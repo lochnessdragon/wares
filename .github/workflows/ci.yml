@@ -34,4 +34,4 @@ jobs:
       - name: Test
         run: |
           cd premake
-          premake5 --file=run_tests.lua self-test
+          premake --file=run_tests.lua self-test
