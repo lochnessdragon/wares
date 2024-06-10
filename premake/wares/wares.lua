@@ -57,12 +57,36 @@ end
 
 -- returns the cache directory for the package manager
 local function get_cache_dir()
-	return os.getenv("WARES_CACHE") or "PackageCache"
+	-- fall back order:
+	-- (1) wares_cache command line option
+	-- (2) WARES_CACHE environment variable
+	-- (3) ./PackageCache
+	return _OPTIONS["wares_cache"] or os.getenv("WARES_CACHE") or "PackageCache"
 end
 
 --------------------
 -- PUBLIC INTERFACE
 --------------------
+
+-- command line interface
+
+-- option: wares_cache the folder that sources should be downloaded to
+newoption {
+   trigger = "wares_cache",
+   value = "path",
+   description = "Choose where wares' cache should be stored.",
+}
+
+-- action: clean-cache wipes the wares cache
+newaction {
+   trigger     = "clean-cache",
+   description = "Cleans the wares cache",
+   execute = function ()
+      local cache_dir = get_cache_dir()
+      -- delete cache
+      os.rmdir(cache_dir)
+   end
+}
 
 -- Version "class"
 Version = { major = 0, minor = 0, patch = 0, pre_release = {}, build_meta = {}}
@@ -284,6 +308,12 @@ pm.version = Version:new(0, 0, 1)
 -- _VERSION is a specialty premake-specific variable that contains the version
 -- as a semver string 
 pm._VERSION = tostring(pm.version)
+
+-- providers for different repositories
+-- providers consume a string specifying arguments and return information about the installed dependency
+pm.providers = {}
+-- github provider
+pm.providers["gh"] = 
 
 pm.github_dependency = function(username, repository_name, tag)
 	local cache_dir = get_cache_dir()
