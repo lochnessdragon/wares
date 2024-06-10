@@ -57,7 +57,7 @@ end
 
 -- returns the cache directory for the package manager
 local function get_cache_dir()
-	return os.getenv("PM_CACHE_DIR") or "PackageCache"
+	return os.getenv("WARES_CACHE") or "PackageCache"
 end
 
 --------------------
@@ -286,7 +286,7 @@ pm._VERSION = tostring(pm.version)
 
 pm.github_dependency = function(username, repository_name, tag)
 	local cache_dir = get_cache_dir()
-	info("Github dependency: " .. username .. "/" .. repository_name .. " tag: " .. tag)
+	log.info("Github dependency: " .. username .. "/" .. repository_name .. " tag: " .. tag)
 	
 	local url = "https://github.com/" .. username .. "/" .. repository_name .. ".git"
 
@@ -300,7 +300,7 @@ pm.github_dependency = function(username, repository_name, tag)
 		-- check if the directory exists (and therefore if the repository is installed)
 		if not os.isdir(install_folder) then
 			-- clone the repository into the specific folder
-			info("Installing to \"" ..  install_folder .. "\"")
+			log.info("Installing to \"" ..  install_folder .. "\"")
 			os.executef("git clone --depth 1 --branch %s -- \"%s\" \"%s\"", tag, url, install_folder)
 		end
 
@@ -333,5 +333,5 @@ pm.dependency = function(dep_str, build_script)
 	end
 end
 
-info("Package Manager version " .. pm.version:string() .. " loaded!")
+log.info("Package Manager version " .. tostring(pm.version) .. " loaded!")
 return pm
