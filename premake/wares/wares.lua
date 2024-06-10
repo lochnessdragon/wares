@@ -277,6 +277,7 @@ function DependencyInfo:include()
 end
 
 -- create a namespace for all the package manager's functions
+-- pm stands for packaged module or package manager
 pm = {}
 
 pm.version = Version:new(0, 0, 1)
