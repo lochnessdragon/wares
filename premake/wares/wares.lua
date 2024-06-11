@@ -394,28 +394,28 @@ function VersionComparator:from_str(comparison_semver)
 	if string.startswith(comparison_type, "^") then
 		-- we've found a hat
 		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	else if string.starswith(comparison_type, "~") then
+	elseif string.starswith(comparison_type, "~") then
 		-- we've found a tilde
 		return VersionComparator:new({comparison_type = "~", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	else if string.starswith(comparison_type, "=") then
+	elseif string.starswith(comparison_type, "=") then
 		-- we've found an equal sign
 		return VersionComparator:new({comparison_type = "=", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	else if string.starswith(comparison_type, ">=") then
+	elseif string.starswith(comparison_type, ">=") then
 		-- we've found an >= sign
 		return VersionComparator:new({comparison_type = ">=", base_version = Version:from_str(string.sub(comparison_semver, 3))})
-	else if string.starswith(comparison_type, "<=") then
+	elseif string.starswith(comparison_type, "<=") then
 		-- we've found an <= sign
 		return VersionComparator:new({comparison_type = "<=", base_version = Version:from_str(string.sub(comparison_semver, 3))})
-	else if string.starswith(comparison_type, ">") then
+	elseif string.starswith(comparison_type, ">") then
 		-- we've found a > sign
 		return VersionComparator:new({comparison_type = ">", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-		else if string.starswith(comparison_type, "<") then
+	elseif string.starswith(comparison_type, "<") then
 		-- we've found a < sign
 		return VersionComparator:new({comparison_type = "<", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	else if string.startswith(comparison_type, "*") then
+	elseif string.startswith(comparison_type, "*") then
 		-- we've found an asterisk in the major position
 		return VersionComparator:new({comparison_type = "*_major", base_version = Version:new(0, 0, 0)})
-	else if not string.contains(comparison_type, "*") then
+	elseif not string.contains(comparison_type, "*") then
 		-- default
 		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(comparison_semver)})
 	end
