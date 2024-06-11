@@ -7,8 +7,9 @@ local version = {{WARES_VERSION}}
 local module_hash = {{WARES_HASH}}
 
 -- check to see if wares has already been installed somewhere in the premake path
-if pcall(require, "wares") then
-	return require "wares"
+local require_status, require_result = pcall(require, "wares")
+if require_status then
+	return require_result
 end
 
 -- download settings

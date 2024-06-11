@@ -436,33 +436,6 @@ function VersionComparator:from_str(comparison_semver)
 	error(string.format("Failed to parse version comparator: %s", comparison_semver))
 end
 
--- DependencyInfo "class"
-DependencyInfo = { name = "", include_dir = "", dependencies = {} }
-DependencyInfo.__index = DependencyInfo
-
-function DependencyInfo:new(o)
-	o = o or {}
-	setmetatable(o, self)
-
-	return o
-end
-
-function DependencyInfo:link()
-	links { self.name }
-	includedirs { self.include_dir }
-
-	for i, dependency in pairs(self.dependencies) do
-		dependency:include()
-	end
-end
-
-function DependencyInfo:include()
-	includedirs { self.include_dir }
-	for i, dependency in pairs(self.dependencies) do
-		dependency:include()
-	end
-end
-
 -- create a namespace for all the package manager's functions
 -- pm stands for packaged module or package manager
 pm = {}
@@ -536,6 +509,9 @@ pm.providers["gh"] = {
 		return dep
 	end,
 
+	-- downloads a depedency based on it's lock information 
+	-- if its not already installs, also returns the folder that 
+	-- the dependency was installed to
 	install = function(lock_info)
 		-- every github lock should have a username and a repository name
 		-- a commit should be included with versioned, tagged, or reved github entrys
@@ -563,35 +539,35 @@ pm.providers["gh"] = {
 				-- it's a little difficult to fetch a singular revision from git, so instead we:
 
 				-- intialize an empty repository
-				os.executef("git -C %s init", install_folder)
+				os.executef("git -C \"%s\" init", install_folder)
 				-- add the remote url as the origin
-				os.executef("git -C %s remote add origin %s", install_folder, url)
+				os.executef("git -C \"%s\" remote add origin %s", install_folder, url)
 				-- fetch the specific revision
-				os.executef("git -C %s fetch --depth 1 origin %s", install_folder, lock_info.rev)
+				os.executef("git -C \"%s\" fetch --depth 1 origin %s", install_folder, lock_info.rev)
 				-- reset the branch to the revision of interest
-				os.executef("git -C %s reset --hard FETCH_HEAD", install_folder)
+				os.executef("git -C \"%s\" reset --hard FETCH_HEAD", install_folder)
 			else
 				-- latest commit
 				os.executef("git clone --depth 1 --single-branch -- \"%s\" \"%s\"", url, install_folder)
 			end
 		elseif lock_info ~= nil then
 			-- we may need to update the branch, check with git-fetch
-			local output, success = run_command(string.format("git -C %s fetch --dry-run", install_folder))
+			local output, success = run_command(string.format("git -C \"%s\" fetch --dry-run", install_folder))
 			if success then
 				if string.len(output) > 0 then
 					-- needs an update
 					local format_str = "" 
 					if lock_info.branch ~= nil then format_str = "Updating %s/%s/%s..." else format_str = "Updating %s/%s..." end
 					log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
-					run_command(sstring.format("git -C %s reset --hard", install_folder))
-					run_command(sstring.format("git -C %s pull", install_folder))
+					run_command(sstring.format("git -C \"%s\" reset --hard", install_folder))
+					run_command(sstring.format("git -C \"%s\" pull", install_folder))
 				end
 			else
-				error("Failed to validate the integrity of %s/%s", lock_info.username, lock_info.repository)
+				error(string.format("Failed to validate the integrity of %s/%s", lock_info.username, lock_info.repository))
 			end
 		end
 
-		return install_folder
+		return lock_info.repository, install_folder
 	end
 }
 pm.providers.gh.__index = pm.providers.gh
@@ -646,22 +622,26 @@ pm.install = function()
 	local lockfile_data, err = json.decode(io.readfile("wares.lock"))
 	if err == nil then
 		-- ignore version key
+		local dep_folders = {}
 		-- for every dependency, lookup the installation provider
 		for i, depedency in ipairs(lockfile_data.dependencies) do
 			local provider = pm.providers[depedency.type]
 			if provider ~= nil then
-				provider.install(depedency)
+				-- return the installation directory for the dependency
+				local dep_name, dep_folder = provider.install(depedency)
+				dep_folders[dep_name] = dep_folder
 			else
 				error("Failed to find a provider for: " .. table.tostring(depedency, 1))
 			end
 		end
-
+		return dep_folders
 	else
 		error(err)
 	end
 end
 
 -- updates the lockfile and installs the required dependencies
+-- returns a dictionary of the dependencies name and where it was installed
 pm.sync = function()
 	-- check to ensure a manifest file is present
 	if not os.isfile("wares.json") then
@@ -684,16 +664,18 @@ pm.sync = function()
 		pm.update() 
 	end
 
-	log.info("Installing dependencies...")
-	pm.install()
-end
+	log.info("Checking lockfile...")
+	local dep_folders = pm.install()
 
--- responsible for:
--- updating the lockfile (if it needs it)
--- downloading/updating dependencies (again, if the need it)
--- generating information about where the source directories of those dependencies can be found.
-pm.load_deps = function()
-	pm.sync()
+	-- try to include any premake5.lua files
+	for name, folder in pairs(dep_folders) do
+		local status, result = pcall(includeexternal, folder)
+		if not status then
+			log.warn("Could not find a premake build file for " .. name .. " you may have to manually create one.")
+		end
+	end
+
+	return dep_folders
 end
 
 -- command line interface
