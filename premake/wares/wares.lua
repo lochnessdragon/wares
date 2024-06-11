@@ -50,9 +50,9 @@ end
 -- run a command and then get the output
 local function run_command(cmd)
 	local handle = io.popen(cmd)
-	local result = handle:read("*a")
-	handle:close()
-	return result
+	local output = handle:read("*a")
+	local status_code = handle:close()
+	return output, status_code
 end
 
 -- returns the cache directory for the package manager
@@ -242,10 +242,8 @@ function Version:new(major, minor, patch, pre_release, build_meta)
 end
 
 function Version:from_str(semver_str)
-  if type(semver_str) ~= "string" then 
-    error("You must provide a string to Version:from_str")
-    return
-  end
+	-- type checking
+	assert(type(semver_str) == "string", "semver_str is not a string")
   
   local match_start, match_end, major, minor, patch = string.find(semver_str, "(%d+).(%d+).(%d+)")
 	local next_start = match_end
@@ -305,6 +303,7 @@ end
 pm = {}
 
 pm.version = Version:new(0, 0, 1)
+
 -- _VERSION is a specialty premake-specific variable that contains the version
 -- as a semver string 
 pm._VERSION = tostring(pm.version)
