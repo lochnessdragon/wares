@@ -137,79 +137,79 @@ Version.__tostring =  function(self)
 	return repr
 end
 
-Version.__eq = function(ver1, ver2)
-  local equal = ver1.major == ver2.major and ver1.minor == ver2.minor and ver1.patch == ver2.patch
-  equal = equal and #ver1.pre_release == #ver2.pre_release 
+Version.__eq = function(left, right)
+  local equal = left.major == right.major and left.minor == right.minor and left.patch == right.patch
+  equal = equal and #left.pre_release == #right.pre_release 
   if equal then 
     -- we now know that both tables have the same length, we can loop through them, checking for equality
-    for i = 1, #ver1.pre_release do
-      equal = equal and ver1.pre_release[i] == ver2.pre_release[i]  
+    for i = 1, #left.pre_release do
+      equal = equal and left.pre_release[i] == right.pre_release[i]  
     end
   end
   
   return equal
 end
 
-Version.__lt = function(ver1, ver2)
-    local less_than = ver1.major < ver2.major
+Version.__lt = function(left, right)
+    local less_than = left.major < right.major
     if less_than then return less_than end -- early out
-    if ver1.major > ver2.major then return false end -- ver1 is actually greater than ver2
+    if left.major > right.major then return false end -- left is actually greater than right
     
-    less_than = ver1.minor < ver2.minor
+    less_than = left.minor < right.minor
     if less_than then return less_than end -- early out 
-    if ver1.minor > ver2.minor then return false end -- ver1 is actually greater than ver2
+    if left.minor > right.minor then return false end -- left is actually greater than right
     
-    less_than = ver1.patch < ver2.patch
+    less_than = left.patch < right.patch
     if less_than then return less_than end -- early out 
-    if ver1.patch > ver2.patch then return false end -- ver1 is actually greater than ver2
+    if left.patch > right.patch then return false end -- left is actually greater than right
     
     -- check pre-release field(s)
     
-    -- ver1 has no pre-release fields?
-    if #ver1.pre_release == 0 and #ver2.pre_release > 0 then return true end
-    -- ver2 has no pre-release fields?
-    if #ver1.pre_release > 0 and #ver2.pre_release == 0 then return false end
+    -- left has no pre-release fields?
+    if #left.pre_release == 0 and #right.pre_release > 0 then return false end
+    -- right has no pre-release fields?
+    if #left.pre_release > 0 and #right.pre_release == 0 then return true end
     
-    if #ver1.pre_release > 0 and #ver2.pre_release > 0 then 
-      local field_count = math.min(#ver1.pre_release, #ver2.pre_release)  
+    if #left.pre_release > 0 and #right.pre_release > 0 then 
+      local field_count = math.min(#left.pre_release, #right.pre_release)  
       -- loop through all matching pre-release fields 
       for i = 1, field_count do 
-        local ver1_is_number = tonumber(ver1.pre_release[i]) ~= nil
-        local ver2_is_number = tonumber(ver2.pre_release[i]) ~= nil
+        local left_is_number = tonumber(left.pre_release[i]) ~= nil
+        local right_is_number = tonumber(right.pre_release[i]) ~= nil
         
         local pre_release_fields_equal = true
         
-        if ver1_is_number and ver2_is_number then 
+        if left_is_number and right_is_number then 
           -- identifiers consisting of only digits are compared numerically.
-          local ver1_number = tonumber(ver1.pre_release[i])
-          local ver2_number = tonumber(ver2.pre_release[i])
-          if ver1_number < ver2_number then 
+          local left_number = tonumber(left.pre_release[i])
+          local right_number = tonumber(right.pre_release[i])
+          if left_number < right_number then 
             less_than = true
             pre_release_fields_equal = false
             break
-          elseif ver2_number < ver1_number then
+          elseif right_number < left_number then
             less_than = false
             pre_release_fields_equal = false
             break
           end
-        elseif not ver1_is_number and not ver2_is_number then 
+        elseif not left_is_number and not right_is_number then 
           -- identifiers with letters or hyphens are compared lexically in ASCII sort order.
           -- lua compares strings in alphabetical order
-          if ver1.pre_release[i] < ver2.pre_release[i] then 
+          if left.pre_release[i] < right.pre_release[i] then 
             less_than = true
             pre_release_fields_equal = false
             break
-          elseif ver2.pre_release[i] < ver1.pre_release[i] then 
+          elseif right.pre_release[i] < left.pre_release[i] then 
             less_than = false
             pre_release_fields_equal = false
             break
           end
-        elseif ver1_is_number and not ver2_is_number then 
+        elseif left_is_number and not right_is_number then 
           -- numeric identifiers always have lower precedence than non-numeric identifiers.
           less_than = true
           pre_release_fields_equal = false
           break
-        elseif not ver1_is_number and ver2_is_number then
+        elseif not left_is_number and right_is_number then
           -- numeric identifiers always have lower precedence than non-numeric identifiers.
           less_than = false
           pre_release_fields_equal = false
@@ -219,9 +219,9 @@ Version.__lt = function(ver1, ver2)
       
       -- a larger set of pre-release fields has a higher precedence than a smaller set, if all of the preceding identifiers are equal.
       if pre_release_fields_equal then 
-        if #ver1.pre_release > #ver2.pre_release then 
+        if #left.pre_release > #right.pre_release then 
           less_than = false
-        elseif #ver2.pre_release > #ver1.pre_release then 
+        elseif #right.pre_release > #left.pre_release then 
           less_than = true
         end
       end
@@ -230,8 +230,8 @@ Version.__lt = function(ver1, ver2)
     return less_than
 end
 
-Version.__le = function(ver1, ver2)
-    return ver1 == ver2 or ver1 < ver2
+Version.__le = function(left, right)
+    return left == right or left < right
 end
 
 function Version:new(major, minor, patch, pre_release, build_meta)
