@@ -302,17 +302,11 @@ end
 -- pm stands for packaged module or package manager
 pm = {}
 
-pm.version = Version:new(0, 0, 1)
+pm.version = Version:new(0, 0, 1, "nightly")
 
 -- _VERSION is a specialty premake-specific variable that contains the version
 -- as a semver string 
 pm._VERSION = tostring(pm.version)
-
--- providers for different repositories
--- providers consume a string specifying arguments and return information about the installed dependency
-pm.providers = {}
--- github provider
-pm.providers["gh"] = "github" 
 
 pm.github_dependency = function(username, repository_name, tag)
 	local cache_dir = get_cache_dir()
@@ -360,6 +354,25 @@ pm.dependency = function(dep_str, build_script)
 		end
 		
 		return source_dir
+	end
+end
+
+-- responsible for:
+-- updating the lockfile (if it needs it)
+-- downloading/updating dependencies (again, if the need it)
+-- generating information about where the source directories of those dependencies can be found.
+pm.load_deps = function()
+	-- check if the lock file needs updating (the manifest file was updated more recently than the lock file)
+	local manifest_stat = os.stat("wares.json")
+	local lockfile_stat = os.stat("wares.lock")
+
+
+
+	local manifest, err = json.decode(io.readfile("wares.json"))
+	if err == nil then
+		print(table.tostring(manifest, 5))
+	else
+		error(err)
 	end
 end
 

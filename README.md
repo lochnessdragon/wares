@@ -5,6 +5,17 @@
 
 A C/C++ package manager compatible with all your favorite build tools.
 
+## Design Philosophy
+
+Wares was designed out of the need for a quick, painless, and easy way to install packages for premake and cmake projects. It was designed because the alternatives failed in one of the following ways:
+
+1. No global cache directory
+2. No easy install from a buildscript
+3. No Premake/CMake support. (The former was particularly apparent)
+4. Smooth build system integration
+
+Our baseline philosophy is to be *fast, lightweight and a joy to use*.
+
 ## Features:
 - Updater script
 - Premake5!
