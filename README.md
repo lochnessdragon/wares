@@ -1,6 +1,7 @@
 # Wares
 
 [![CI](https://github.com/lochnessdragon/wares/actions/workflows/ci.yml/badge.svg)](https://github.com/lochnessdragon/wares/actions/workflows/ci.yml)
+[![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/lochnessdragon/wares?label=Tag&logo=GitHub)](https://github.com/lochnessdragon/wares/releases)
 
 A C/C++ package manager compatible with all your favorite build tools.
 
