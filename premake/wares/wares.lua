@@ -79,7 +79,7 @@ newoption {
 
 -- action: clean-cache wipes the wares cache
 newaction {
-   trigger     = "clean-cache",
+   trigger     = "wares-clean",
    description = "Cleans the wares cache",
    execute = function ()
       local cache_dir = get_cache_dir()
@@ -313,7 +313,7 @@ pm._VERSION = tostring(pm.version)
 -- providers consume a string specifying arguments and return information about the installed dependency
 pm.providers = {}
 -- github provider
-pm.providers["gh"] = 
+pm.providers["gh"] = "github" 
 
 pm.github_dependency = function(username, repository_name, tag)
 	local cache_dir = get_cache_dir()
