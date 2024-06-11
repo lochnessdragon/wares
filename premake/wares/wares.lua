@@ -1,7 +1,7 @@
 -- wares.lua
 -- the main wares Premake module file
 
--- wares 0.0.1
+ -- TODO: better error handling
 
 ----------------------
 -- PRIVATE INTERFACE
@@ -32,6 +32,11 @@ log.error = function(msg)
 	term.popColor()
 end
 
+local function alias(table, alias_name, original)
+	table[alias_name] = {}
+	setmetatable(table[alias_name], table[original])
+end
+
 local function consume_dot_separated_fields(str, start)
   local result = {}
 	while true do
@@ -51,8 +56,8 @@ end
 local function run_command(cmd)
 	local handle = io.popen(cmd)
 	local output = handle:read("*a")
-	local status_code = handle:close()
-	return output, status_code
+	local succeeded = handle:close() -- boolean
+	return output, succeeded
 end
 
 -- returns the cache directory for the package manager
@@ -64,29 +69,32 @@ local function get_cache_dir()
 	return _OPTIONS["wares_cache"] or os.getenv("WARES_CACHE") or "PackageCache"
 end
 
+-- returns a list of versions from git ls-remote
+local function get_github_versions(username, repository)
+	local output, succeeded = run_command(string.format("git ls-remote --tags https://github.com/%s/%s.git", username, repository))
+
+	local versions = {}
+
+	if succeeded then
+		--refs/tags/v<semver>
+		local match_start = 0
+		local match_end = 0
+		local semver = nil
+		while true do
+			match_start, match_end, commit, semver = string.find(output, "(%w+)%s+refs/tags/v([%w%.%-]+)", match_end)
+			if match_start == nil then break end
+      versions[Version:from_str(semver)] = commit
+		end
+	else
+		error(string.format("Failed to find github dependency %s/%s\n{CmdOut: %s}", username, repository, output))
+	end
+
+	return versions
+end
+
 --------------------
 -- PUBLIC INTERFACE
 --------------------
-
--- command line interface
-
--- option: wares_cache the folder that sources should be downloaded to
-newoption {
-   trigger = "wares_cache",
-   value = "path",
-   description = "Choose where wares' cache should be stored.",
-}
-
--- action: clean-cache wipes the wares cache
-newaction {
-   trigger     = "wares-clean",
-   description = "Cleans the wares cache",
-   execute = function ()
-      local cache_dir = get_cache_dir()
-      -- delete cache
-      os.rmdir(cache_dir)
-   end
-}
 
 -- Version "class"
 Version = { major = 0, minor = 0, patch = 0, pre_release = {}, build_meta = {}}
@@ -271,6 +279,47 @@ function Version:from_str(semver_str)
 	return Version:new(major, minor, patch, pre_release_fields, build_metadata_fields)
 end
 
+-- VersionComparator "class"
+-- ex: ^1.14.0
+-- a caret (^) prior to the semver indicates that it should allow everything up to a major change 
+-- caret == "semver_compatible"
+VersionComparator = { comparison_type = "semver_compat", base_version = Version }
+VersionComparator.__index = VersionComparator
+
+VersionComparator.__tostring = function(self)
+	return "^" .. tostring(self.base_version)
+end
+
+-- return true if this comparison matches a particular version, false otherwise
+function VersionComparator:matches(version)
+	if self.comparison_type == "semver_compat" then
+		-- versions with pre-release fields are automatically incompatible
+		if #version.pre_release > 0 then return false end
+		-- as are versions with different majors
+		if version.major ~= self.base_version.major then return false end
+		-- any minor greater than base
+		if version.minor == self.base_version.minor then
+			-- any patch greater than or equal to base
+			if version.patch >= self.base_version.patch then
+				return true
+			end
+		elseif version.minor > self.base_version.minor then
+			return true
+		end
+		return false
+	end
+end
+
+function VersionComparator:new(o)
+	setmetatable(o, self)
+
+	return o
+end
+
+function VersionComparator:from_str(comparison_semver)
+	return VersionComparator:new({comparison_type = "semver_compat", base_version = Version:from_str(comparison_semver:sub(2))})
+end
+
 -- DependencyInfo "class"
 DependencyInfo = { name = "", include_dir = "", dependencies = {} }
 DependencyInfo.__index = DependencyInfo
@@ -308,53 +357,175 @@ pm.version = Version:new(0, 0, 1, "nightly")
 -- as a semver string 
 pm._VERSION = tostring(pm.version)
 
-pm.github_dependency = function(username, repository_name, tag)
-	local cache_dir = get_cache_dir()
-	log.info("Github dependency: " .. username .. "/" .. repository_name .. " tag: " .. tag)
-	
-	local url = "https://github.com/" .. username .. "/" .. repository_name .. ".git"
+-- providers
+-- responsible for implementing the resolve and download
+-- functions
+pm.providers = {}
+pm.providers["gh"] = {
+	lock = function(dep_str)
+		-- github strings look something alike to:
+		-- username/repository@semver
+		-- username/repository#tag
+		-- username/repository <-- defaults to latest main branch commit
+		-- username/repository/branch <-- latest commit on that branch
+		-- username/repository!revision
+		-- username and repository are required
 
-	-- check if the remote repository and tag exists
-	local git_query_result = run_command(string.format("git ls-remote %s %s", url, tag))
-	if string.find(git_query_result, "fatal:") == nil then
-		-- convert the tag to a commit
-		local str_start, str_end, commit = string.find(git_query_result, "(%w+)\t[%a/]+" .. tag)
-		local install_folder = path.getabsolute(cache_dir .. "/" .. username .. "-" .. repository_name .. "-" .. commit)
+		-- generate the lock information
+		local dep = { type = "github" }
 
-		-- check if the directory exists (and therefore if the repository is installed)
-		if not os.isdir(install_folder) then
-			-- clone the repository into the specific folder
-			log.info("Installing to \"" ..  install_folder .. "\"")
-			os.executef("git clone --depth 1 --branch %s -- \"%s\" \"%s\"", tag, url, install_folder)
+		-- try to read the username
+		local match_start, match_end, username = string.find(dep_str, "([%w._]+)")
+		dep.username = username
+
+		-- try to read the repository
+		local match_start, match_end, repository = string.find(dep_str, "([%w._]+)", match_end + 2)
+		dep.repository = repository
+
+		-- try all of: semver, tag, revision, and branch, choose one
+		local next_char = dep_str:sub(match_end + 1, match_end + 1)
+		if next_char == "@" then
+			local semver = dep_str:sub(match_end + 2)
+			-- find matching commit and version for this semver
+			local version_comp = VersionComparator:from_str(semver)
+			-- gather all versions from the git ls-remote
+			local versions_commits = get_github_versions(username, repository)
+			-- find the latest version that matches the comparison operator
+			-- sort the versions
+			local versions = {}
+			for version in pairs(versions_commits) do table.insert(versions, version) end
+			table.sort(versions)
+			-- iterate through the versions in descending order
+			for i = #versions,1,-1 do
+				if version_comp:matches(versions[i]) then
+					dep.version = tostring(versions[i])
+					dep.commit = versions_commits[versions[i]]
+					break
+				end
+			end
+			if dep.version == nil then error("Failed to match " .. version_comp .. " with " .. username .. "/" .. repository) end
+		elseif next_char == "#" then
+			local tag = dep_str:sub(match_end + 2)
+			dep.tag = tag
+		elseif next_char == "!" then
+			local rev = dep_str:sub(match_end + 2)
+			dep.rev = rev
+		elseif next_char == "/" then
+			local branch = dep_str:sub(match_end + 2)
+			dep.branch = branch
 		end
 
-		return install_folder .. "/"
+		return dep
+	end,
+
+	install = function(lock_info)
+		-- a commit should be included with **every** github entry
+		local install_folder = path.getabsolute(get_cache_dir() .. "/" .. "gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.commit)
+
+		-- check if the folder exists, and therefore if the dependency is installed
+		if not os.isdir(install_folder) then 
+			log.info(string.format("Installing github depedency: %s/%s to %s", lock_info.username, lock_info.repository, install_folder))
+			if lock_info.version ~= nil then
+				local url = "https://github.com/" .. lock_info.username .. "/" .. lock_info.repository .. ".git"
+				os.executef("git clone --depth 1 --branch v%s -- \"%s\" \"%s\"", lock_info.version, url, install_folder)
+			end
+		end
+
+		return install_folder
+	end
+}
+pm.providers.gh.__index = pm.providers.gh
+
+alias(pm.providers, "github", "gh")
+
+-- updates the lockfile
+pm.update = function()
+	local manifest, err = json.decode(io.readfile("wares.json"))
+	if err == nil then
+		-- we ignore the version key for now
+		-- create the lockfile table
+		local lockfile_data = { version = 0, dependencies = {} }
+		for k, v in ipairs(manifest.dependencies) do
+			-- depedencies can only either be a string or a table with more information
+			--assert(type(v) == "string" or type(v) == "table", "depedencies array can only consist of strings or tables!")
+			if type(v) == "string" then 
+				-- the first order of business is determining the provider for the string
+				local match_start, match_end, provider_id = string.find(v, "(%a+)")
+				if provider_id ~= nil then
+					local provider = pm.providers[provider_id]
+					if provider ~= nil then
+						provider.lock(string.sub(v, match_end+2))
+						table.insert(lockfile_data.dependencies, provider.lock(string.sub(v, match_end+2)))
+					else
+						error("Failed to find a provider for: " .. provider_id)
+					end
+				else
+					error("Malformed depedency!")
+				end
+			elseif type(v) == "table" then
+
+			else
+				error("The dependencies array can only consist of strings or tables")
+			end
+		end
+
+		-- write lockfile
+		local lockfile_str, err = json.encode(lockfile_data)
+		if err == nil then
+			io.writefile("wares.lock", lockfile_str)
+		else
+			error(err)
+		end
 	else
-		error("Failed to find the github tag " .. tag .. " for " .. username .. "/" .. repository_name)
+		error(err)
 	end
 end
 
--- dependency: declares a dependency to be consumed by this project
--- dep_str: specifies how to find/install the package
--- Ex: gh:gambine/spdlog@v1.14.1
-pm.dependency = function(dep_str, build_script)
-	local dep_parts = string.explode(dep_str, ":")
-	if dep_parts[1] == "gh" then 
-		local username_info = string.explode(dep_parts[2], "/")
-		local repo_version = string.explode(username_info[2], "@")
-		local source_dir = pm.github_dependency(username_info[1], repo_version[1], repo_version[2])
-
-		-- if we were provided a buildscript, try and run it!
-		if build_script then
-			if source_dir then
-				return include(build_script)(source_dir)
+-- installs required dependencies
+pm.install = function()
+	local lockfile_data, err = json.decode(io.readfile("wares.lock"))
+	if err == nil then
+		-- ignore version key
+		-- for every dependency, lookup the installation provider
+		for i, depedency in ipairs(lockfile_data.dependencies) do
+			local provider = pm.providers[depedency.type]
+			if provider ~= nil then
+				provider.install(depedency)
 			else
-				error("Cannot run the provided build script as the package failed to download.")
+				error("Failed to find a provider for: " .. table.tostring(depedency, 1))
 			end
 		end
-		
-		return source_dir
+
+	else
+		error(err)
 	end
+end
+
+-- updates the lockfile and installs the required dependencies
+pm.sync = function()
+	-- check to ensure a manifest file is present
+	if not os.isfile("wares.json") then
+		error("Failed to find a manifest file!")
+	end
+
+	-- if the lock file doesn't exist, it needs updating
+	local update_lockfile = not os.isfile("wares.lock")
+
+	if not update_lockfile then
+		-- check if the lock file needs updating (the manifest file was updated more recently than the lock file)
+		local manifest_stat = os.stat("wares.json")
+		local lockfile_stat = os.stat("wares.lock")
+
+		update_lockfile = lockfile_stat.mtime < manifest_stat.mtime
+	end
+
+	if update_lockfile then 
+		log.info("Updating wares.lock...")
+		pm.update() 
+	end
+
+	log.info("Installing dependencies...")
+	pm.install()
 end
 
 -- responsible for:
@@ -362,19 +533,35 @@ end
 -- downloading/updating dependencies (again, if the need it)
 -- generating information about where the source directories of those dependencies can be found.
 pm.load_deps = function()
-	-- check if the lock file needs updating (the manifest file was updated more recently than the lock file)
-	local manifest_stat = os.stat("wares.json")
-	local lockfile_stat = os.stat("wares.lock")
-
-
-
-	local manifest, err = json.decode(io.readfile("wares.json"))
-	if err == nil then
-		print(table.tostring(manifest, 5))
-	else
-		error(err)
-	end
+	pm.sync()
 end
+
+-- command line interface
+
+-- option: wares_cache the folder that sources should be downloaded to
+newoption {
+   trigger = "wares_cache",
+   value = "path",
+   description = "Choose where wares' cache should be stored.",
+}
+
+-- action: wares-clean wipes the wares cache
+newaction {
+   trigger     = "wares-clean",
+   description = "Cleans the wares cache",
+   execute = function ()
+      local cache_dir = get_cache_dir()
+      -- delete cache
+      os.rmdir(cache_dir)
+   end
+}
+
+-- action: wares-sync updates the lockfile if necessary and installs from the lockfile
+newaction {
+   trigger     = "wares-sync",
+   description = "Cleans the wares cache",
+   execute = pm.sync
+}
 
 log.info("Package Manager version " .. tostring(pm.version) .. " loaded!")
 return pm
