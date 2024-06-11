@@ -1,4 +1,7 @@
 # Wares
+
+[![CI](https://github.com/lochnessdragon/wares/actions/workflows/ci.yml/badge.svg)](https://github.com/lochnessdragon/wares/actions/workflows/ci.yml)
+
 A C/C++ package manager compatible with all your favorite build tools.
 
 ## Features:
