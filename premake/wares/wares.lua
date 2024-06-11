@@ -458,11 +458,43 @@ pm.providers["gh"] = {
 			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-latest")
 		end
 		-- check if the folder exists, and therefore if the dependency is installed
-		if not os.isdir(install_folder) then 
+		if not os.isdir(install_folder) then
 			log.info(string.format("Installing github depedency: %s/%s to %s", lock_info.username, lock_info.repository, install_folder))
+			local url = "https://github.com/" .. lock_info.username .. "/" .. lock_info.repository .. ".git"
 			if lock_info.version ~= nil then
-				local url = "https://github.com/" .. lock_info.username .. "/" .. lock_info.repository .. ".git"
-				os.executef("git clone --depth 1 --branch v%s -- \"%s\" \"%s\"", lock_info.version, url, install_folder)
+				os.executef("git clone --depth 1 --single-branch --branch v%s -- \"%s\" \"%s\"", lock_info.version, url, install_folder)
+			elseif lock_info.tag ~= nil then
+				os.executef("git clone --depth 1 --single-branch --branch %s -- \"%s\" \"%s\"", lock_info.tag, url, install_folder)
+			elseif lock_info.branch ~= nil then
+				os.executef("git clone --depth 1 --single-branch --branch %s  -- \"%s\" \"%s\"", lock_info.branch, url, install_folder)
+			elseif lock_info.rev ~= nil then
+				-- it's a little difficult to fetch a singular revision from git, so instead we:
+
+				-- intialize an empty repository
+				os.executef("git -C %s init", install_folder)
+				-- add the remote url as the origin
+				os.executef("git -C %s remote add origin %s", install_folder, url)
+				-- fetch the specific revision
+				os.executef("git -C %s fetch --depth 1 origin %s", install_folder, lock_info.rev)
+				-- reset the branch to the revision of interest
+				os.executef("git -C %s reset --hard FETCH_HEAD", install_folder)
+			else
+				-- latest commit
+				os.executef("git clone --depth 1 --single-branch -- \"%s\" \"%s\"", url, install_folder)
+			end
+		elseif lock_info ~= nil then
+			-- we may need to update the branch, check with git-fetch
+			local output, success = run_command(string.format("git -C %s fetch --dry-run", install_folder))
+			if success then
+				if string.len(output) > 0 then
+					-- needs an update
+					local format_str = if lock_info.branch ~= nil then "Updating %s/%s/%s..." else "Updating %s/%s..." end
+					log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
+					run_command(sstring.format("git -C %s reset --hard", install_folder))
+					run_command(sstring.format("git -C %s pull", install_folder))
+				end
+			else
+				error("Failed to validate the integrity of %s/%s", lock_info.username, lock_info.repository)
 			end
 		end
 
