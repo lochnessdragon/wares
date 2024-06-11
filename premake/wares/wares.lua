@@ -669,7 +669,7 @@ pm.sync = function()
 
 	-- try to include any premake5.lua files
 	for name, folder in pairs(dep_folders) do
-		local status, result = pcall(includeexternal, folder)
+		local status, result = pcall(include, folder)
 		if not status then
 			log.warn("Could not find a premake build file for " .. name .. " you may have to manually create one.")
 		end
