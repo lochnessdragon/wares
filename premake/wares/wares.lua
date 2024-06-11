@@ -298,25 +298,36 @@ end
 -- a caret (^) prior to the semver indicates that it should allow everything up to a major change 
 -- caret == "semver_compatible"
 -- comparison type is one of:
--- ^  = semver_compat <-- default
+-- ^  = SemVer compat <-- default
 -- =  = equal
--- >= = greater_than_or_equal
--- <= = less_than_or_equal
--- ~  = stricter_compat
--- *  = any_major
---    = any_minor
---    = any_patch
+-- >= = greater than or equal
+-- >  = greater than
+-- <= = less than or equal
+-- <  = less than
+-- ~  = stricter SemVer compat
+-- *  = any in the asterisk position *, 1.*, or 1.1.*
 
-VersionComparator = { comparison_type = "semver_compat", base_version = Version }
+VersionComparator = { comparison_type = ">=", base_version = Version }
 VersionComparator.__index = VersionComparator
 
 VersionComparator.__tostring = function(self)
-	return "^" .. tostring(self.base_version)
+	return self.comparison_type .. tostring(self.base_version)
 end
 
 -- return true if this comparison matches a particular version, false otherwise
 function VersionComparator:matches(version)
-	if self.comparison_type == "semver_compat" then
+	if self.comparison_type == "=" then -- probably the easiest case
+		return self.base_version == version
+	elseif self.comparison_type == ">=" then
+		return version >= self.base_version
+	elseif self.comparison_type == ">" then
+		return version > self.base_version
+	elseif self.comparison_type == "<=" then
+		return version <= self.base_version
+	elseif self.comparison_type == "<" then
+		return version < self.base_version
+	elseif self.comparison_type == "^" then
+		-- Semantic Versioning compatibility
 		-- versions with pre-release fields are automatically incompatible
 		if #version.pre_release > 0 then return false end
 		-- as are versions with different majors
@@ -331,6 +342,35 @@ function VersionComparator:matches(version)
 			return true
 		end
 		return false
+	elseif self.comparison_type == "~" then
+		-- stricter compatibility range
+		-- versions with pre-release fields are automatically incompatible
+		if #version.pre_release > 0 then return false end
+		-- as are versions with different majors
+		if version.major ~= self.base_version.major then return false end
+		-- and different minors
+		if version.minor ~= self.base_version.minor then return false end
+		-- only versions with greater than or equal to patches are allowed
+		return version.patch >= self.base_version.patch
+	elseif self.comparison_type == "*_major" then
+		-- as long as it has no pre-releases, then it's compatible
+		if #version.pre_release > 0 then return false else return true end
+	elseif self.comparison_type == "*_minor" then
+		-- versions with pre-release fields are automatically incompatible
+		if #version.pre_release > 0 then return false end
+		-- as are versions with different majors
+		if version.major ~= self.base_version.major then return false end
+		-- everything else is compatible
+		return true
+	elseif self.comparison_type == "*_patch" then
+		-- versions with pre-release fields are automatically incompatible
+		if #version.pre_release > 0 then return false end
+		-- as are versions with different majors
+		if version.major ~= self.base_version.major then return false end
+		-- and different minors
+		if version.minor ~= self.base_version.minor then return false end
+		-- everything else is compatible
+		return true
 	end
 end
 
@@ -341,7 +381,59 @@ function VersionComparator:new(o)
 end
 
 function VersionComparator:from_str(comparison_semver)
-	return VersionComparator:new({comparison_type = "semver_compat", base_version = Version:from_str(comparison_semver:sub(2))})
+	-- read right to left, the version must start with one of:
+	-- ^
+	-- ~
+	-- *
+	-- <
+	-- >
+	-- <=
+	-- >=
+	-- =
+	-- a digit
+	if string.startswith(comparison_type, "^") then
+		-- we've found a hat
+		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(string.sub(comparison_semver, 2))})
+	else if string.starswith(comparison_type, "~") then
+		-- we've found a tilde
+		return VersionComparator:new({comparison_type = "~", base_version = Version:from_str(string.sub(comparison_semver, 2))})
+	else if string.starswith(comparison_type, "=") then
+		-- we've found an equal sign
+		return VersionComparator:new({comparison_type = "=", base_version = Version:from_str(string.sub(comparison_semver, 2))})
+	else if string.starswith(comparison_type, ">=") then
+		-- we've found an >= sign
+		return VersionComparator:new({comparison_type = ">=", base_version = Version:from_str(string.sub(comparison_semver, 3))})
+	else if string.starswith(comparison_type, "<=") then
+		-- we've found an <= sign
+		return VersionComparator:new({comparison_type = "<=", base_version = Version:from_str(string.sub(comparison_semver, 3))})
+	else if string.starswith(comparison_type, ">") then
+		-- we've found a > sign
+		return VersionComparator:new({comparison_type = ">", base_version = Version:from_str(string.sub(comparison_semver, 2))})
+		else if string.starswith(comparison_type, "<") then
+		-- we've found a < sign
+		return VersionComparator:new({comparison_type = "<", base_version = Version:from_str(string.sub(comparison_semver, 2))})
+	else if string.startswith(comparison_type, "*") then
+		-- we've found an asterisk in the major position
+		return VersionComparator:new({comparison_type = "*_major", base_version = Version:new(0, 0, 0)})
+	else if not string.contains(comparison_type, "*") then
+		-- default
+		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(comparison_semver)})
+	end
+
+	-- everything else has an asterisk at some point
+	-- is the asterisk in the minor field?
+	local match_start, match_end, maybe_major = string.find(comparison_semver, "(%d+).%*")
+	if maybe_major ~= nil then
+		return VersionComparator:new({comparison_type = "*_minor", base_version = Version:new(tonumber(maybe_major), 0, 0)})
+	end
+
+	-- is the asterisk in the patch field?
+	local match_start, match_end, maybe_major, maybe_minor = string.find(comparison_semver, "(%d+).(%d+).%*")
+	if maybe_major ~= nil then
+		return VersionComparator:new({comparison_type = "*_patch", base_version = Version:new(tonumber(maybe_major), tonumber(maybe_minor), 0)})
+	end
+
+	error(string.format("Failed to parse version comparator: %s", comparison_semver))
 end
 
 -- DependencyInfo "class"

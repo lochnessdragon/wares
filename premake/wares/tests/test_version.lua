@@ -11,13 +11,13 @@ function suite.versionToStr()
 end
 
 function suite.versionEqual()
-	
+	test.isequal(Version:new(0, 5, 3, {"alpha"}), Version:new(0, 5, 3, {"alpha"}))
 end
 
 function suite.versionLessThan()
-
+	test.istrue(Version:new(0, 0, 1) < Version:new(0, 0, 2))
 end
 
 function suite.versionLessThanEqualTo()
-
+	test.istrue(Version:new(1, 5, 7, "alpha") <= Version:new(1, 5, 7))
 end
