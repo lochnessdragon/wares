@@ -37,6 +37,19 @@ Our baseline philosophy is to be *fast, lightweight and a joy to use*.
 
 ## Using
 
+The first thing you will need to setup is a `wares.json` file. This specifies the various depedencies to download into your project. An example of this file is below:
+
+```json
+{
+	"version": 0,
+	"dependencies": [
+		"gh:gabime/spdlog@^1.14.0"
+	]
+}
+```
+
+As you can see, this project depends on spdlog at or above version 1.14.0, but not 2.0.0.
+
 ### Premake
 
 #### Installation
