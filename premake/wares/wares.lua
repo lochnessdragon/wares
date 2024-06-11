@@ -92,6 +92,19 @@ local function get_github_versions(username, repository)
 	return versions
 end
 
+-- returns the commit associated to a tag from git ls-remote
+local function get_github_tag(username, repository, tag)
+	local output, succeeded = run_command(string.format("git ls-remote --tags https://github.com/%s/%s.git %s", username, repository, tag))
+	if succeeded then
+		--refs/tags/<tag>
+		local match_start, match_end, commit_hash = string.find(output, "(%w+)%s+refs/tags/" .. tag)
+		if match_start == nil then error(string.format("Failed to find a tag matching %s for the github repository: %s/%s", tag, username, repository)) end
+		return commit_hash
+	else
+		error(string.format("Failed to find github tag: %s in %s/%s\n{CmdOut: %s}", tag, username, repository, output))
+	end
+end
+
 --------------------
 -- PUBLIC INTERFACE
 --------------------
@@ -280,9 +293,20 @@ function Version:from_str(semver_str)
 end
 
 -- VersionComparator "class"
+-- follows rust's version matching rules
 -- ex: ^1.14.0
 -- a caret (^) prior to the semver indicates that it should allow everything up to a major change 
 -- caret == "semver_compatible"
+-- comparison type is one of:
+-- ^  = semver_compat <-- default
+-- =  = equal
+-- >= = greater_than_or_equal
+-- <= = less_than_or_equal
+-- ~  = stricter_compat
+-- *  = any_major
+--    = any_minor
+--    = any_patch
+
 VersionComparator = { comparison_type = "semver_compat", base_version = Version }
 VersionComparator.__index = VersionComparator
 
@@ -407,6 +431,8 @@ pm.providers["gh"] = {
 		elseif next_char == "#" then
 			local tag = dep_str:sub(match_end + 2)
 			dep.tag = tag
+			-- lock the tag to a commit
+			dep.commit = get_github_tag(username, repository, tag)
 		elseif next_char == "!" then
 			local rev = dep_str:sub(match_end + 2)
 			dep.rev = rev
@@ -419,9 +445,18 @@ pm.providers["gh"] = {
 	end,
 
 	install = function(lock_info)
-		-- a commit should be included with **every** github entry
-		local install_folder = path.getabsolute(get_cache_dir() .. "/" .. "gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.commit)
-
+		-- every github lock should have a username and a repository name
+		-- a commit should be included with versioned, tagged, or reved github entrys
+		-- if it doesn't include a commmit, but does include a branch, then it should follow that branch at the latest commit
+		-- if it doesn't include a branch nor a commit, it should follow the main branch at the latest commit
+		local install_folder = ""
+		if lock_info.commit ~= nil then
+			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.commit)
+		elseif lock_info.branch ~= nil then
+			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.branch .. "-latest")
+		else
+			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-latest")
+		end
 		-- check if the folder exists, and therefore if the dependency is installed
 		if not os.isdir(install_folder) then 
 			log.info(string.format("Installing github depedency: %s/%s to %s", lock_info.username, lock_info.repository, install_folder))
