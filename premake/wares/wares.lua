@@ -488,7 +488,8 @@ pm.providers["gh"] = {
 			if success then
 				if string.len(output) > 0 then
 					-- needs an update
-					local format_str = if lock_info.branch ~= nil then "Updating %s/%s/%s..." else "Updating %s/%s..." end
+					local format_str = "" 
+					if lock_info.branch ~= nil then format_str = "Updating %s/%s/%s..." else format_str = "Updating %s/%s..." end
 					log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
 					run_command(sstring.format("git -C %s reset --hard", install_folder))
 					run_command(sstring.format("git -C %s pull", install_folder))
@@ -617,16 +618,15 @@ newaction {
    trigger     = "wares-clean",
    description = "Cleans the wares cache",
    execute = function ()
-      local cache_dir = get_cache_dir()
       -- delete cache
-      os.rmdir(cache_dir)
+      os.rmdir(get_cache_dir())
    end
 }
 
 -- action: wares-sync updates the lockfile if necessary and installs from the lockfile
 newaction {
    trigger     = "wares-sync",
-   description = "Cleans the wares cache",
+   description = "Updates the lockfile and installs dependencies",
    execute = pm.sync
 }
 
