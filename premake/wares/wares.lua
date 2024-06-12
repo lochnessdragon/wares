@@ -391,31 +391,31 @@ function VersionComparator:from_str(comparison_semver)
 	-- >=
 	-- =
 	-- a digit
-	if string.startswith(comparison_type, "^") then
+	if string.startswith(comparison_semver, "^") then
 		-- we've found a hat
 		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	elseif string.starswith(comparison_type, "~") then
+	elseif string.startswith(comparison_semver, "~") then
 		-- we've found a tilde
 		return VersionComparator:new({comparison_type = "~", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	elseif string.starswith(comparison_type, "=") then
+	elseif string.startswith(comparison_semver, "=") then
 		-- we've found an equal sign
 		return VersionComparator:new({comparison_type = "=", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	elseif string.starswith(comparison_type, ">=") then
+	elseif string.startswith(comparison_semver, ">=") then
 		-- we've found an >= sign
 		return VersionComparator:new({comparison_type = ">=", base_version = Version:from_str(string.sub(comparison_semver, 3))})
-	elseif string.starswith(comparison_type, "<=") then
+	elseif string.startswith(comparison_semver, "<=") then
 		-- we've found an <= sign
 		return VersionComparator:new({comparison_type = "<=", base_version = Version:from_str(string.sub(comparison_semver, 3))})
-	elseif string.starswith(comparison_type, ">") then
+	elseif string.startswith(comparison_semver, ">") then
 		-- we've found a > sign
 		return VersionComparator:new({comparison_type = ">", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	elseif string.starswith(comparison_type, "<") then
+	elseif string.startswith(comparison_semver, "<") then
 		-- we've found a < sign
 		return VersionComparator:new({comparison_type = "<", base_version = Version:from_str(string.sub(comparison_semver, 2))})
-	elseif string.startswith(comparison_type, "*") then
+	elseif string.startswith(comparison_semver, "*") then
 		-- we've found an asterisk in the major position
 		return VersionComparator:new({comparison_type = "*_major", base_version = Version:new(0, 0, 0)})
-	elseif not string.contains(comparison_type, "*") then
+	elseif not string.contains(comparison_semver, "*") then
 		-- default
 		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(comparison_semver)})
 	end
@@ -559,8 +559,8 @@ pm.providers["gh"] = {
 					local format_str = "" 
 					if lock_info.branch ~= nil then format_str = "Updating %s/%s/%s..." else format_str = "Updating %s/%s..." end
 					log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
-					run_command(sstring.format("git -C \"%s\" reset --hard", install_folder))
-					run_command(sstring.format("git -C \"%s\" pull", install_folder))
+					run_command(string.format("git -C \"%s\" reset --hard", install_folder))
+					run_command(string.format("git -C \"%s\" pull", install_folder))
 				end
 			else
 				error(string.format("Failed to validate the integrity of %s/%s", lock_info.username, lock_info.repository))
@@ -573,6 +573,27 @@ pm.providers["gh"] = {
 pm.providers.gh.__index = pm.providers.gh
 
 alias(pm.providers, "github", "gh")
+
+pm.providers["path"] = {
+	lock = function(dep_info)
+		-- paths don't really have a specific version, so our job here is easy:
+		-- store the path and optionally the name
+		local lock_info = { type = "path" }
+		if type(dep_info) == "string" then
+			lock_info.path = dep_info
+			-- the name should just be the last folder name in the chain
+			lock_info.name = string.findlast(dep_info, "(%w+)")
+		elseif type(dep_info) == "table" then
+			lock_info.path = dep_info.path
+			lock_info.name = dep_info.name or string.findlast(dep_info.path, "(%w+)")
+		end
+		return lock_info
+	end,
+
+	install = function(lock_info)
+		return lock_info.name, lock_info.path
+	end
+}
 
 -- updates the lockfile
 pm.update = function()
@@ -590,16 +611,30 @@ pm.update = function()
 				if provider_id ~= nil then
 					local provider = pm.providers[provider_id]
 					if provider ~= nil then
-						provider.lock(string.sub(v, match_end+2))
-						table.insert(lockfile_data.dependencies, provider.lock(string.sub(v, match_end+2)))
+						local lock_info = provider.lock(string.sub(v, match_end + 2))
+						table.insert(lockfile_data.dependencies, lock_info)
 					else
 						error("Failed to find a provider for: " .. provider_id)
 					end
 				else
-					error("Malformed depedency!")
+					error("Malformed dependency!")
 				end
 			elseif type(v) == "table" then
-
+				if v.type ~= nil then
+					local provider = pm.providers[v.type]
+					if provider ~= nil then
+						local lock_info = provider.lock(v)
+						table.insert(lockfile_data.dependencies, lock_info)
+						-- how do we determine the next lockfile to read?
+						-- (1) ask each provider to fetch the new manifest info?>
+						-- (2) ask each provider to recursively call another update function w/ a different wares file?
+						-- (3)  
+					else
+						error("Failed to find a provider for: " .. v.type)
+					end
+				else
+					error("Missing type field from dependency!")
+				end
 			else
 				error("The dependencies array can only consist of strings or tables")
 			end
@@ -608,7 +643,7 @@ pm.update = function()
 		-- write lockfile
 		local lockfile_str, err = json.encode(lockfile_data)
 		if err == nil then
-			io.writefile("wares.lock", lockfile_str)
+			io.writefile(_MAIN_SCRIPT_DIR .. "/wares.lock", lockfile_str)
 		else
 			error(err)
 		end
@@ -619,7 +654,7 @@ end
 
 -- installs required dependencies
 pm.install = function()
-	local lockfile_data, err = json.decode(io.readfile("wares.lock"))
+	local lockfile_data, err = json.decode(io.readfile(_MAIN_SCRIPT_DIR .. "/wares.lock"))
 	if err == nil then
 		-- ignore version key
 		local dep_folders = {}
@@ -641,6 +676,7 @@ pm.install = function()
 end
 
 -- updates the lockfile and installs the required dependencies
+-- sync only needs to be called by the top file.
 -- returns a dictionary of the dependencies name and where it was installed
 pm.sync = function()
 	-- check to ensure a manifest file is present
@@ -649,19 +685,20 @@ pm.sync = function()
 	end
 
 	-- if the lock file doesn't exist, it needs updating
-	local update_lockfile = not os.isfile("wares.lock")
+	local lockfilename = _MAIN_SCRIPT_DIR .. "/wares.lock" 
+	local update_lockfile = not os.isfile(lockfilename)
 
 	if not update_lockfile then
 		-- check if the lock file needs updating (the manifest file was updated more recently than the lock file)
 		local manifest_stat = os.stat("wares.json")
-		local lockfile_stat = os.stat("wares.lock")
+		local lockfile_stat = os.stat(lockfilename)
 
 		update_lockfile = lockfile_stat.mtime < manifest_stat.mtime
 	end
 
 	if update_lockfile then 
 		log.info("Updating wares.lock...")
-		pm.update() 
+		pm.update()
 	end
 
 	log.info("Checking lockfile...")
@@ -671,7 +708,7 @@ pm.sync = function()
 	for name, folder in pairs(dep_folders) do
 		local status, result = pcall(include, folder)
 		if not status then
-			log.warn("Could not find a premake build file for " .. name .. " you may have to manually create one.")
+			log.warn("Could not find a premake build file for " .. name .. ". You may have to manually create one.")
 		end
 	end
 

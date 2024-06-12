@@ -1,3 +1,9 @@
+<br />
+<p align="center">
+  <img src="./logos/wares_logo.png" height="100" />
+</p>
+<br />
+
 # Wares
 
 [![CI](https://github.com/lochnessdragon/wares/actions/workflows/ci.yml/badge.svg)](https://github.com/lochnessdragon/wares/actions/workflows/ci.yml)
