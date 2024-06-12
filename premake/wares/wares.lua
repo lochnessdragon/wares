@@ -505,8 +505,8 @@ pm.providers["gh"] = {
 			local branch = dep_str:sub(match_end + 2)
 			dep.branch = branch
 		end
-
-		return dep
+		-- TODO: implement recursively reading manifest.json
+		return {dep}
 	end,
 
 	-- downloads a depedency based on it's lock information 
@@ -587,7 +587,13 @@ pm.providers["path"] = {
 			lock_info.path = dep_info.path
 			lock_info.name = dep_info.name or string.findlast(dep_info.path, "(%w+)")
 		end
-		return lock_info
+
+		local deps = nil
+		if os.isfile(lock_info.path .. "/wares.json") then
+			deps = pm.parse_manifest(lock_info.path .. "/wares.json")
+		end
+
+		return table.join({lock_info}, deps)
 	end,
 
 	install = function(lock_info)
@@ -595,24 +601,24 @@ pm.providers["path"] = {
 	end
 }
 
--- updates the lockfile
-pm.update = function()
-	local manifest, err = json.decode(io.readfile("wares.json"))
+-- reads a manifest file and returns the lockfile information that should be generated from it
+pm.parse_manifest = function(manifest_filename)
+	local manifest, err = json.decode(io.readfile(manifest_filename))
 	if err == nil then
 		-- we ignore the version key for now
-		-- create the lockfile table
-		local lockfile_data = { version = 0, dependencies = {} }
+		-- create the deps table
+		local dependencies = {}
 		for k, v in ipairs(manifest.dependencies) do
 			-- depedencies can only either be a string or a table with more information
 			--assert(type(v) == "string" or type(v) == "table", "depedencies array can only consist of strings or tables!")
+			local lock_info = nil
 			if type(v) == "string" then 
 				-- the first order of business is determining the provider for the string
 				local match_start, match_end, provider_id = string.find(v, "(%a+)")
 				if provider_id ~= nil then
 					local provider = pm.providers[provider_id]
 					if provider ~= nil then
-						local lock_info = provider.lock(string.sub(v, match_end + 2))
-						table.insert(lockfile_data.dependencies, lock_info)
+						lock_info = provider.lock(string.sub(v, match_end + 2))
 					else
 						error("Failed to find a provider for: " .. provider_id)
 					end
@@ -623,12 +629,7 @@ pm.update = function()
 				if v.type ~= nil then
 					local provider = pm.providers[v.type]
 					if provider ~= nil then
-						local lock_info = provider.lock(v)
-						table.insert(lockfile_data.dependencies, lock_info)
-						-- how do we determine the next lockfile to read?
-						-- (1) ask each provider to fetch the new manifest info?>
-						-- (2) ask each provider to recursively call another update function w/ a different wares file?
-						-- (3)  
+						lock_info = provider.lock(v)
 					else
 						error("Failed to find a provider for: " .. v.type)
 					end
@@ -638,15 +639,39 @@ pm.update = function()
 			else
 				error("The dependencies array can only consist of strings or tables")
 			end
+
+			-- join the lock_info into the dependencies if it is unique
+			-- table.insert(lockfile_data.dependencies, lock_info)
+			for i, new_dep in ipairs(lock_info) do
+				local unique = true
+				local j = 1
+				while unique and j <= #dependencies do
+					unique = table.concat(new_dep) == table.concat(dependencies[j])
+					j = j + 1
+				end
+				if unique then
+					table.insert(dependencies, new_dep)
+				end
+			end
 		end
 
-		-- write lockfile
-		local lockfile_str, err = json.encode(lockfile_data)
-		if err == nil then
-			io.writefile(_MAIN_SCRIPT_DIR .. "/wares.lock", lockfile_str)
-		else
-			error(err)
-		end
+		return dependencies
+	else
+		error(err)
+	end
+end
+
+-- updates the lockfile
+pm.update = function()
+	-- create the lockfile table (always start in the root directory)
+	local lockfile_data = { version = 0, dependencies = pm.parse_manifest(_MAIN_SCRIPT_DIR .. "/wares.json") }
+
+	print(table.tostring(lockfile_data, 2))
+
+	-- write lockfile
+	local lockfile_str, err = json.encode(lockfile_data)
+	if err == nil then
+		io.writefile(_MAIN_SCRIPT_DIR .. "/wares.lock", lockfile_str)
 	else
 		error(err)
 	end
@@ -679,6 +704,8 @@ end
 -- sync only needs to be called by the top file.
 -- returns a dictionary of the dependencies name and where it was installed
 pm.sync = function()
+	if pm.dep_folders then return pm.dep_folders end
+
 	-- check to ensure a manifest file is present
 	if not os.isfile("wares.json") then
 		error("Failed to find a manifest file!")
@@ -703,6 +730,11 @@ pm.sync = function()
 
 	log.info("Checking lockfile...")
 	local dep_folders = pm.install()
+
+	-- we should not have to sync again this run
+	-- setting this variable before we look for other premake files ensure that no calls to pm.sync()
+	-- do needless checks
+	pm.dep_folders = dep_folders
 
 	-- try to include any premake5.lua files
 	for name, folder in pairs(dep_folders) do
