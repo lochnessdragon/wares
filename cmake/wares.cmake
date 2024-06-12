@@ -7,7 +7,7 @@ set(CURRENT_WARES_VERSION 0.0.1-alpha)
 # Initialize logging prefix
 if(NOT __WARES_INDENT)
   set(__WARES_INDENT
-      "wares:"
+      "[wares]:"
       CACHE INTERNAL ""
   )
 endif()
@@ -52,6 +52,32 @@ endmacro()
   set(BoldWhite   "${Esc}[1;37m")
 #endif()
 
+############################
+# Providers
+############################
+
+# Github provider
+function(wares_github_install DEPEDENCY)
+
+endfunction()
+
+# Path Provider
+
+function(wares_path_install DEPENDENCY)
+    string(JSON DEPENDENCY GET ${NAME} "name")
+    string(JSON DEPENDENCY GET ${PATH} "path")
+
+    # if there is a top-level CMakeLists.txt file, call add_subdirectory()
+    if(EXISTS "${PATH}/CMakeLists.txt")
+        add_subdirectory(${PATH})
+    endif()
+
+    # this should work for setting the source directory
+    # TODO: set binary directory
+    set("${NAME}_SOURCE_DIR" ${PATH})
+    set("${NAME}_ADDED" YES)
+endfunction()
+
 function(__wares_parse_manifest FILENAME)
     file(READ ${FILENAME} MANIFEST_TEXT)
     #wares_log("${MANIFEST_TEXT}")
@@ -63,9 +89,26 @@ endfunction()
 
 function(__wares_install)
     file(READ "${CMAKE_SOURCE_DIR}/wares.lock" LOCKFILE_TEXT)
+    string(JSON DEPENDENCIES_LIST GET ${LOCKFILE_TEXT} "dependencies")
+    # when should the loop stop?
+    string(JSON DEPENDENCIES_STOP LENGTH ${DEPENDENCIES_LIST})
+    MATH(EXPR DEPENDENCIES_STOP "${DEPENDENCIES_STOP}-1")
+    foreach(INDEX RANGE ${DEPENDENCIES_STOP})
+        string(JSON DEPENDENCY GET ${DEPENDENCIES_LIST} ${INDEX})
+        string(JSON PROVIDER_ID GET ${DEPENDENCY} "type")
 
+        # call the correct provider implementation for install 
+        if(NOT COMMAND "wares_${PROVIDER_ID}_install")
+            __wares_log("No provider found for: ${PROVIDER_ID}")
+        else()
+           cmake_language(CALL "wares_${PROVIDER_ID}_install" "${DEPENDENCY}")
+        endif()
+    endforeach()
 endfunction()
 
+# The only command that needs to be run in CMakeLists.txt
+# reponsible for updating the lockfile and downloading any missing dependencies
+# after that, the important variables are defined similar to FetchContent and CPM.cmake
 function(wares_sync)
     if(NOT EXISTS "${CMAKE_SOURCE_DIR}/wares.json")
         __wares_log("You must create a wares.json file!")
