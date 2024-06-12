@@ -1,6 +1,6 @@
 <br />
 <p align="center">
-  <img src="./logos/wares_logo.png" height="100" />
+  <img src="./logos/wares_logo.png" height="100" style="image-rendering:pixelated;image-rendering:-moz-crisp-edges;image-rendering:crisp-edges" />
 </p>
 <br />
 
