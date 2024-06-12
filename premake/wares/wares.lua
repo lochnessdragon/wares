@@ -382,15 +382,7 @@ end
 
 function VersionComparator:from_str(comparison_semver)
 	-- read right to left, the version must start with one of:
-	-- ^
-	-- ~
-	-- *
-	-- <
-	-- >
-	-- <=
-	-- >=
-	-- =
-	-- a digit
+	-- ^, ~, *, <, >, <=, >=, =, or a digit
 	if string.startswith(comparison_semver, "^") then
 		-- we've found a hat
 		return VersionComparator:new({comparison_type = "^", base_version = Version:from_str(string.sub(comparison_semver, 2))})
@@ -773,5 +765,5 @@ newaction {
    execute = pm.sync
 }
 
-log.info("Package Manager version " .. tostring(pm.version) .. " loaded!")
+log.info("Wares v" .. tostring(pm.version) .. " (premake) loaded!")
 return pm

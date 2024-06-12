@@ -63,16 +63,16 @@ To use wares with your premake file, simply add `premake/get_wares.lua` somewher
 
 #### Usage:
 
-An example of using wares in a script is below:
+A (very simplified) example of using wares in a script is below (using the previous `dependencies.json` file):
 ```lua
 wares = include("get_wares.lua")
 
-local spdlog = pm.depedency("gh:gabime/spdlog@v1.14.1", "./spdlog.lua")
+local deps = wares.sync()
 
 project "App"
 	kind "ConsoleApp"
 	language "C++"
 
 	links { "spdlog" }
-	includedirs { spdlog.install_folder .. "include/" }
+	includedirs { deps["spdlog"] .. "/include/" }
 ```
