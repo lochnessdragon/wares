@@ -40,3 +40,19 @@ jobs:
         run: |
           cd premake
           premake5 --file=run_tests.lua self-test
+  # cmake tests
+  cmake_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Run cmake tests
+      - name: Configure Project
+        run: |
+          cmake -Hcmake/tests/ -Bbuild
+
+      - name: Run Unit Tests
+        run: |
+          cd build
+          ctest -j 2 --output-on-failure
