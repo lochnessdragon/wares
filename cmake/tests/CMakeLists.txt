@@ -34,9 +34,10 @@ endmacro()
 get_cmake_test()
 
 # Include CMakeTest
-include(cmake_test/cmake_test)
 include(${cmake_test_SOURCE_DIR}/cmake/get_cmaize.cmake)
 include(${cmake_test_SOURCE_DIR}/cmake/get_cmakepp_lang.cmake)
+list(APPEND CMAKE_MODULE_PATH "${cmaize_SOURCE_DIR}" "${cmakepp_SOURCE_DIR}")
+include(cmake_test/cmake_test)
 
 # custom:
 
