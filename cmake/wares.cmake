@@ -56,16 +56,33 @@ endmacro()
 # Helpful Functions
 ############################
 
+# inverts a boolean value
+function (invert_bool bool result)
+  if(${bool})
+    set(${result} false PARENT_SCOPE)
+  else()
+    set(${result} true PARENT_SCOPE)
+  endif()
+endfunction()
+
 # returns true if one json value is equal to another.
 function(json_equals left right result)
     set(equal TRUE)
+    # if their types are not equal, then they are not equal
+    string(JSON left_type TYPE ${left})
+    string(JSON right_type TYPE ${right})
+
+    # 
+
 
     set(${result} ${equal} PARENT_SCOPE)
 endfunction()
 
 # returns true if the two elements are not equal
 function(json_nequals left right result)
-    
+    json_equals(${left} ${right} equal)
+    invert_bool(${equal} ${not_equal})
+    set(${result} ${not_equal} PARENT_SCOPE)
 endfunction()
 
 # returns the length of a json array

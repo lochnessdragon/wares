@@ -1,3 +1,5 @@
+project(WaresTests)
+
 include(CTest)
 
 #[[[
@@ -37,5 +39,4 @@ include(cmake_test/cmake_test)
 
 include(wares.cmake)
 
-# including the custom tests
-include(tests/test_json_functions.cmake)
+ct_add_dir("./cmake_tests", CT_DEBUG_MODE_ON)
