@@ -107,13 +107,10 @@ get_cmakepp_lang()
 get_cmake_test()
 
 # Include CMakeTest
-#include(${cmake_test_SOURCE_DIR}/cmake/get_cmaize.cmake)
-#include(${cmake_test_SOURCE_DIR}/cmake/get_cmakepp_lang.cmake)
-#list(APPEND CMAKE_MODULE_PATH "${cmaize_SOURCE_DIR}/cmake" "${cmakepp_SOURCE_DIR}/cmake")
 include(cmake_test/cmake_test)
 
 # custom:
-
-include(../wares.cmake)
+list(APPEND CMAKE_MODULE_PATH "../")
+# for later calls to: include(wares)
 
 ct_add_dir("./cmake_tests", CT_DEBUG_MODE_ON)
