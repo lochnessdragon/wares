@@ -35,8 +35,8 @@ get_cmake_test()
 
 # Include CMakeTest
 include(cmake_test/cmake_test)
-include(${cmake_test_SOURCE_DIR}/get_cmaize.cmake)
-include(${cmake_test_SOURCE_DIR}/get_cmakepp_lang.cmake)
+include(${cmake_test_SOURCE_DIR}/cmake/get_cmaize.cmake)
+include(${cmake_test_SOURCE_DIR}/cmake/get_cmakepp_lang.cmake)
 
 # custom:
 
