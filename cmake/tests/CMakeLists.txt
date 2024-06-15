@@ -35,6 +35,8 @@ get_cmake_test()
 
 # Include CMakeTest
 include(cmake_test/cmake_test)
+include(get_cmaize.cmake)
+include(get_cmakepp_lang.cmake)
 
 # custom:
 
