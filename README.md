@@ -44,7 +44,7 @@ Our baseline philosophy is to be *fast, lightweight and a joy to use*.
 
 ## Using
 
-The first thing you will need to setup is a `wares.json` file. This specifies the various depedencies to download into your project. An example of this file is below:
+The first thing you will need to setup is a `wares.json` file. This specifies the various dependencies to download into your project. An example of this file is below:
 
 ```json
 {
@@ -112,7 +112,7 @@ To use wares with your cmake file, simply add `cmake/get_wares.cmake` somewhere 
 
 #### Usage:
 
-A (very simplified) example of using wares in a CMakeLists.txt file is below (using the previous `dependencies.json` file):
+A (very simplified) example of using wares in a `CMakeLists.txt` file is below (using the previous `dependencies.json` file):
 ```cmake
 cmake_minimum_required(VERSION 3.19)
 include(get_wares.cmake)
@@ -126,3 +126,12 @@ add_executable(App src/main.cpp)
 # spdlog is now included in the project, link it
 target_link_libraries(App spdlog)
 ```
+
+### CLI
+
+Could:
+ - install packages/update lockfile
+ - clean cache
+ - debug installation issues
+ - add packages to the wares.json file
+ - export dependencies to other formats (meson wrap, bdep, etc.)
