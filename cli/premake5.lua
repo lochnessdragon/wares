@@ -1,5 +1,6 @@
 workspace "WaresCLI"
-	
+	platforms { "x64" }
+	configurations { "Debug", "Release" }
 
 
 project "wares"
