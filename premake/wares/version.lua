@@ -1,3 +1,20 @@
+-- Helper functions!
+-- splits a string on a period
+local function consume_dot_separated_fields(str, start)
+  local result = {}
+	while true do
+	  -- find 'next' pre-release field
+    local match_start, match_end, field = string.find(str, "([%w-]+)", start)
+    if match_start == nil then break end
+    table.insert(result, field)
+    start = match_end + 1
+    -- check if there is a remaining field
+    if string.sub(str, start, start) ~= "." then break end
+	end
+	
+	return result, start
+end
+
 -- Version "class"
 Version = { major = 0, minor = 0, patch = 0, pre_release = {}, build_meta = {}}
 
@@ -154,12 +171,33 @@ function Version:from_str(semver_str)
 	-- type checking
 	assert(type(semver_str) == "string", "semver_str is not a string")
   
-  local match_start, match_end, major, minor, patch = string.find(semver_str, "(%d+).(%d+).(%d+)")
-	local next_start = match_end
+  -- we go a little off the rails from semver here, allowing things like:
+  -- major-prerelease
+  -- major.minor-prerelease
+	local major = 0
+	local minor = 0
+	local patch = 0
+
+	local next_start = 0
 	
-	major = tonumber(major)
-	minor = tonumber(minor)
-	patch = tonumber(patch)
+	for i in 1,3 do
+		local match_start, match_end, field_str = string.find(semver_str, "(%d+)", next_start)
+		if match_start == nil then error("Malformed semver: " .. semver_str) end
+		if i == 1 then
+			major = tonumber(field_str)
+		elseif i == 2 then
+			minor = tonumber(field_str)
+		elseif i == 3 then
+			patch = tonumber(field_str)
+		end
+
+		next_start = match_end
+
+		-- can't find another field before the end? ==> break the loop
+		local next_char = semver_str:sub(next_start + 1, next_start + 1)
+		if not next_char == "." then break end
+		next_start = next_start + 1
+	end
 	
 	-- look for all of the pre-release field(s) following the major.minor.patch
 	local pre_release_fields = {}

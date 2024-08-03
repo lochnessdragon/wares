@@ -20,64 +20,15 @@
 -- Console Operations
 ----------------------
 
--- Error Handling
-local log = {}
-
-log.info = function(msg)
-	term.pushColor(term.lightGreen)
-	print("[wares]: " .. msg)
-	term.popColor()
-end
-
-log.warn = function(msg)
-	term.pushColor(term.warningColor)
-	print("[wares/warn]: " .. msg)
-	term.popColor()
-end
-
-log.error = function(msg)
-	term.pushColor(term.errorColor)
-	print("[wares/error]: " .. msg)
-	term.popColor()
-end
-
-local array = {}
-
--- array pretty printer
----@param array any[]
----@return string
-function array.tostring(array)
-	local result = "["
-	for i, item in ipairs(array) do
-		if i > 0 then
-			result = result .. ", "
-		end
-    result = result .. item
-	end
-	result = result .. "]"
-	return result
-end
+-- Logging
+local log = include "log.lua"
+local array = include "array.lua"
+local utils = include "utils.lua"
 
 -- adds another entry on a table that points to the same object
 local function alias(table, alias_name, original)
 	table[alias_name] = {}
 	setmetatable(table[alias_name], table[original])
-end
-
--- splits a string on a period
-local function consume_dot_separated_fields(str, start)
-  local result = {}
-	while true do
-	  -- find 'next' pre-release field
-    local match_start, match_end, field = string.find(str, "([%w-]+)", start)
-    if match_start == nil then break end
-    table.insert(result, field)
-    start = match_end + 1
-    -- check if there is a remaining field
-    if string.sub(str, start, start) ~= "." then break end
-	end
-	
-	return result, start
 end
 
 -- run a command and then get the output
@@ -143,7 +94,7 @@ local function get_git_tag(url, tag, human_readable_identifier)
 	local output, succeeded = run_command(string.format("git ls-remote --tags %s %s", url, tag))
 	if succeeded then
 		--refs/tags/<tag>
-		local match_start, match_end, commit_hash = string.find(output, "(%w+)%s+refs/tags/" .. tag)
+		local match_start, match_end, commit_hash = string.find(output, "(%w+)%s+refs/tags/" .. utils.regex_escape(tag))
 		if match_start == nil then error(string.format("Failed to find a tag matching %s for the %s", tag, human_readable_identifier)) end
 		return commit_hash
 	else
@@ -153,15 +104,15 @@ end
 
 -- provider specific endpoints here
 local function get_github_tag(username, repository, tag)
-	return get_git_tag(string.format("https://github.com/%s/%s.git", username, repository, tag), string.format("github repository: %s/%s", username, repository))
+	return get_git_tag(string.format("https://github.com/%s/%s.git", username, repository), tag, string.format("github repository: %s/%s", username, repository))
 end
 
 local function get_gitlab_tag(username, repository, tag)
-	return get_git_tag(string.format("https://gitlab.com/%s/%s.git", username, repository, tag), string.format("gitlab repository: %s/%s", username, repository))
+	return get_git_tag(string.format("https://gitlab.com/%s/%s.git", username, repository), tag, string.format("gitlab repository: %s/%s", username, repository))
 end
 
 local function get_bitbucket_tag(username, repository, tag)
-	return get_git_tag(string.format("https://bitbucket.org/%s/%s.git", username, repository, tag), string.format("bitbucket repository: %s/%s", username, repository))
+	return get_git_tag(string.format("https://bitbucket.org/%s/%s.git", username, repository), tag, string.format("bitbucket repository: %s/%s", username, repository))
 end
 
 --------------------
@@ -213,64 +164,130 @@ pm.providers["git"] = {
 }
 pm.providers.git.__index = pm.providers.git
 
+-- locks a dependency using a dep_str that looks similar to the github dependency strings
+local function github_like_lock(dep_str, provider_name, version_callback, tag_callback)
+	-- github-like strings look something alike to:
+	-- username/repository@semver
+	-- username/repository#tag
+	-- username/repository <-- defaults to latest main branch commit
+	-- username/repository/branch <-- latest commit on that branch
+	-- username/repository!revision
+	-- username and repository are required
+	local lock_info = {}
+	-- try to read the username
+	local match_start, match_end, username = string.find(dep_str, "([%w._%-]+)")
+	if match_start == nil then error("Failed to find a username in the ".. provider_name .. " dependency: " .. dep_str)	end
+	lock_info.username = username
+
+	-- try to read the repository
+	local match_start, match_end, repository = string.find(dep_str, "([%w._%-]+)", match_end + 2)
+	if match_start == nil then error("Failed to find a repository in the ".. provider_name .. " dependency: " .. dep_str)	end
+	lock_info.repository = repository
+
+	-- try all of: semver, tag, revision, and branch, choose one
+	local next_char = dep_str:sub(match_end + 1, match_end + 1)
+	if next_char == "@" then
+		local semver = dep_str:sub(match_end + 2)
+		-- find matching commit and version for this semver
+		local version_comp = VersionComparator:from_str(semver)
+		-- gather all versions from the git ls-remote
+		local versions_commits = version_callback(username, repository)
+		-- find the latest version that matches the comparison operator
+		-- sort the versions
+		local versions = {}
+		for version in pairs(versions_commits) do table.insert(versions, version) end
+		table.sort(versions)
+		-- iterate through the versions in descending order
+		for i = #versions,1,-1 do
+			if version_comp:matches(versions[i]) then
+				lock_info.version = tostring(versions[i])
+				lock_info.commit = versions_commits[versions[i]]
+				break
+			end
+		end
+		if lock_info.version == nil then error("Failed to match " .. tostring(version_comp).. " with " .. username .. "/" .. repository) end
+	elseif next_char == "#" then
+		local tag = dep_str:sub(match_end + 2)
+		lock_info.tag = tag
+		-- lock the tag to a commit
+		lock_info.commit = tag_callback(username, repository, tag)
+	elseif next_char == "!" then
+		local rev = dep_str:sub(match_end + 2)
+		lock_info.rev = rev
+	elseif next_char == "/" then
+		local branch = dep_str:sub(match_end + 2)
+		lock_info.branch = branch
+	end
+	-- TODO: implement recursively reading manifest.json
+	return lock_info
+end
+
+-- installs a dependency that uses a table that looks similar to the github dependency install tables
+local function github_like_install(lock_info, unique_id, url_pattern)
+	-- every github-like lock info should have a username, a repository name, and a type
+	-- a commit should be included with versioned, tagged, or reved github entrys
+	-- if it doesn't include a commmit, but does include a branch, then it should follow that branch at the latest commit
+	-- if it doesn't include a branch nor a commit, it should follow the main branch at the latest commit
+	local install_folder = ""
+	if lock_info.commit ~= nil then
+		install_folder = path.getabsolute(get_cache_dir() .. "/" .. unique_id .. "-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.commit)
+	elseif lock_info.branch ~= nil then
+		install_folder = path.getabsolute(get_cache_dir() .. "/" .. unique_id .. "-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.branch .. "-latest")
+	else
+		install_folder = path.getabsolute(get_cache_dir() .. "/" .. unique_id .. "-" .. lock_info.username .. "-" .. lock_info.repository .. "-latest")
+	end
+	-- check if the folder exists, and therefore if the dependency is installed
+	if not os.isdir(install_folder) then
+		log.info(string.format("Installing %s depedency: %s/%s to %s", lock_info.type, lock_info.username, lock_info.repository, install_folder))
+		local url = string.format(url_pattern, lock_info.username, lock_info.repository)
+		
+		if lock_info.version ~= nil then
+			os.executef("git clone --depth 1 --single-branch --branch v%s -- \"%s\" \"%s\"", lock_info.version, url, install_folder)
+		elseif lock_info.tag ~= nil then
+			os.executef("git clone --depth 1 --single-branch --branch %s -- \"%s\" \"%s\"", lock_info.tag, url, install_folder)
+		elseif lock_info.branch ~= nil then
+			os.executef("git clone --depth 1 --single-branch --branch %s  -- \"%s\" \"%s\"", lock_info.branch, url, install_folder)
+		elseif lock_info.rev ~= nil then
+			-- it's a little difficult to fetch a singular revision from git, so instead we:
+
+			-- intialize an empty repository
+			os.executef("git -C \"%s\" init", install_folder)
+			-- add the remote url as the origin
+			os.executef("git -C \"%s\" remote add origin %s", install_folder, url)
+			-- fetch the specific revision
+			os.executef("git -C \"%s\" fetch --depth 1 origin %s", install_folder, lock_info.rev)
+			-- reset the branch to the revision of interest
+			os.executef("git -C \"%s\" reset --hard FETCH_HEAD", install_folder)
+		else
+			-- latest commit
+			os.executef("git clone --depth 1 --single-branch -- \"%s\" \"%s\"", url, install_folder)
+		end
+	elseif lock_info ~= nil then
+		-- we may need to update the branch, check with git-fetch
+		local output, success = run_command(string.format("git -C \"%s\" fetch --dry-run", install_folder))
+		if success then
+			if string.len(output) > 0 then
+				-- needs an update
+				local format_str = "" 
+				if lock_info.branch ~= nil then format_str = "Updating %s/%s/%s..." else format_str = "Updating %s/%s..." end
+				log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
+				run_command(string.format("git -C \"%s\" reset --hard", install_folder))
+				run_command(string.format("git -C \"%s\" pull", install_folder))
+			end
+		else
+			error(string.format("Failed to validate the integrity of %s dependency: %s/%s", lock_info.type, lock_info.username, lock_info.repository))
+		end
+	end
+
+	return lock_info.repository, install_folder
+end
+
 -- Github
 pm.providers["gh"] = {
 	lock = function(dep_str)
-		-- github strings look something alike to:
-		-- username/repository@semver
-		-- username/repository#tag
-		-- username/repository <-- defaults to latest main branch commit
-		-- username/repository/branch <-- latest commit on that branch
-		-- username/repository!revision
-		-- username and repository are required
-
 		-- generate the lock information
-		local dep = { type = "github" }
-
-		-- try to read the username
-		local match_start, match_end, username = string.find(dep_str, "([%w._]+)")
-		if match_start == nil then error("Failed to find a username in the github dependency: " .. dep_str)	end
-		dep.username = username
-
-		-- try to read the repository
-		local match_start, match_end, repository = string.find(dep_str, "([%w._]+)", match_end + 2)
-		if match_start == nil then error("Failed to find a repository in the github dependency: " .. dep_str)	end
-		dep.repository = repository
-
-		-- try all of: semver, tag, revision, and branch, choose one
-		local next_char = dep_str:sub(match_end + 1, match_end + 1)
-		if next_char == "@" then
-			local semver = dep_str:sub(match_end + 2)
-			-- find matching commit and version for this semver
-			local version_comp = VersionComparator:from_str(semver)
-			-- gather all versions from the git ls-remote
-			local versions_commits = get_github_versions(username, repository)
-			-- find the latest version that matches the comparison operator
-			-- sort the versions
-			local versions = {}
-			for version in pairs(versions_commits) do table.insert(versions, version) end
-			table.sort(versions)
-			-- iterate through the versions in descending order
-			for i = #versions,1,-1 do
-				if version_comp:matches(versions[i]) then
-					dep.version = tostring(versions[i])
-					dep.commit = versions_commits[versions[i]]
-					break
-				end
-			end
-			if dep.version == nil then error("Failed to match " .. version_comp .. " with " .. username .. "/" .. repository) end
-		elseif next_char == "#" then
-			local tag = dep_str:sub(match_end + 2)
-			dep.tag = tag
-			-- lock the tag to a commit
-			dep.commit = get_github_tag(username, repository, tag)
-		elseif next_char == "!" then
-			local rev = dep_str:sub(match_end + 2)
-			dep.rev = rev
-		elseif next_char == "/" then
-			local branch = dep_str:sub(match_end + 2)
-			dep.branch = branch
-		end
+		local dep = github_like_lock(dep_str, "github", get_github_versions, get_github_tag)
+		dep["type"] = "github"
 		-- TODO: implement recursively reading manifest.json
 		return {dep}
 	end,
@@ -279,61 +296,7 @@ pm.providers["gh"] = {
 	-- if its not already installs, also returns the folder that 
 	-- the dependency was installed to
 	install = function(lock_info)
-		-- every github lock should have a username and a repository name
-		-- a commit should be included with versioned, tagged, or reved github entrys
-		-- if it doesn't include a commmit, but does include a branch, then it should follow that branch at the latest commit
-		-- if it doesn't include a branch nor a commit, it should follow the main branch at the latest commit
-		local install_folder = ""
-		if lock_info.commit ~= nil then
-			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.commit)
-		elseif lock_info.branch ~= nil then
-			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.branch .. "-latest")
-		else
-			install_folder = path.getabsolute(get_cache_dir() .. "/gh-" .. lock_info.username .. "-" .. lock_info.repository .. "-latest")
-		end
-		-- check if the folder exists, and therefore if the dependency is installed
-		if not os.isdir(install_folder) then
-			log.info(string.format("Installing github depedency: %s/%s to %s", lock_info.username, lock_info.repository, install_folder))
-			local url = "https://github.com/" .. lock_info.username .. "/" .. lock_info.repository .. ".git"
-			if lock_info.version ~= nil then
-				os.executef("git clone --depth 1 --single-branch --branch v%s -- \"%s\" \"%s\"", lock_info.version, url, install_folder)
-			elseif lock_info.tag ~= nil then
-				os.executef("git clone --depth 1 --single-branch --branch %s -- \"%s\" \"%s\"", lock_info.tag, url, install_folder)
-			elseif lock_info.branch ~= nil then
-				os.executef("git clone --depth 1 --single-branch --branch %s  -- \"%s\" \"%s\"", lock_info.branch, url, install_folder)
-			elseif lock_info.rev ~= nil then
-				-- it's a little difficult to fetch a singular revision from git, so instead we:
-
-				-- intialize an empty repository
-				os.executef("git -C \"%s\" init", install_folder)
-				-- add the remote url as the origin
-				os.executef("git -C \"%s\" remote add origin %s", install_folder, url)
-				-- fetch the specific revision
-				os.executef("git -C \"%s\" fetch --depth 1 origin %s", install_folder, lock_info.rev)
-				-- reset the branch to the revision of interest
-				os.executef("git -C \"%s\" reset --hard FETCH_HEAD", install_folder)
-			else
-				-- latest commit
-				os.executef("git clone --depth 1 --single-branch -- \"%s\" \"%s\"", url, install_folder)
-			end
-		elseif lock_info ~= nil then
-			-- we may need to update the branch, check with git-fetch
-			local output, success = run_command(string.format("git -C \"%s\" fetch --dry-run", install_folder))
-			if success then
-				if string.len(output) > 0 then
-					-- needs an update
-					local format_str = "" 
-					if lock_info.branch ~= nil then format_str = "Updating %s/%s/%s..." else format_str = "Updating %s/%s..." end
-					log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
-					run_command(string.format("git -C \"%s\" reset --hard", install_folder))
-					run_command(string.format("git -C \"%s\" pull", install_folder))
-				end
-			else
-				error(string.format("Failed to validate the integrity of %s/%s", lock_info.username, lock_info.repository))
-			end
-		end
-
-		return lock_info.repository, install_folder
+		return github_like_install(lock_info, "gh", "https://github.com/%s/%s.git")
 	end
 }
 pm.providers.gh.__index = pm.providers.gh
@@ -343,59 +306,8 @@ alias(pm.providers, "github", "gh")
 -- Gitlab
 pm.providers["gl"] = {
 	lock = function(dep_str)
-		-- gitlab strings look something alike to:
-		-- username/repository@semver
-		-- username/repository#tag
-		-- username/repository <-- defaults to latest main branch commit
-		-- username/repository/branch <-- latest commit on that branch
-		-- username/repository!revision
-		-- username and repository are required
-
-		-- generate the lock information
-		local dep = { type = "gitlab" }
-
-		-- try to read the username
-		local match_start, match_end, username = string.find(dep_str, "([%w._]+)")
-		dep.username = username
-
-		-- try to read the repository
-		local match_start, match_end, repository = string.find(dep_str, "([%w._]+)", match_end + 2)
-		dep.repository = repository
-
-		-- try all of: semver, tag, revision, and branch, choose one
-		local next_char = dep_str:sub(match_end + 1, match_end + 1)
-		if next_char == "@" then
-			local semver = dep_str:sub(match_end + 2)
-			-- find matching commit and version for this semver
-			local version_comp = VersionComparator:from_str(semver)
-			-- gather all versions from the git ls-remote
-			local versions_commits = get_github_versions(username, repository)
-			-- find the latest version that matches the comparison operator
-			-- sort the versions
-			local versions = {}
-			for version in pairs(versions_commits) do table.insert(versions, version) end
-			table.sort(versions)
-			-- iterate through the versions in descending order
-			for i = #versions,1,-1 do
-				if version_comp:matches(versions[i]) then
-					dep.version = tostring(versions[i])
-					dep.commit = versions_commits[versions[i]]
-					break
-				end
-			end
-			if dep.version == nil then error("Failed to match " .. version_comp .. " with " .. username .. "/" .. repository) end
-		elseif next_char == "#" then
-			local tag = dep_str:sub(match_end + 2)
-			dep.tag = tag
-			-- lock the tag to a commit
-			dep.commit = get_github_tag(username, repository, tag)
-		elseif next_char == "!" then
-			local rev = dep_str:sub(match_end + 2)
-			dep.rev = rev
-		elseif next_char == "/" then
-			local branch = dep_str:sub(match_end + 2)
-			dep.branch = branch
-		end
+		local dep = github_like_lock(dep_str, "gitlab", get_gitlab_versions, get_gitlab_tag)
+		dep["type"] = "gitlab"
 		-- TODO: implement recursively reading manifest.json
 		return {dep}
 	end,
@@ -404,67 +316,14 @@ pm.providers["gl"] = {
 	-- if its not already installs, also returns the folder that 
 	-- the dependency was installed to
 	install = function(lock_info)
-		-- every github lock should have a username and a repository name
-		-- a commit should be included with versioned, tagged, or reved github entrys
-		-- if it doesn't include a commmit, but does include a branch, then it should follow that branch at the latest commit
-		-- if it doesn't include a branch nor a commit, it should follow the main branch at the latest commit
-		local install_folder = ""
-		if lock_info.commit ~= nil then
-			install_folder = path.getabsolute(get_cache_dir() .. "/gl-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.commit)
-		elseif lock_info.branch ~= nil then
-			install_folder = path.getabsolute(get_cache_dir() .. "/gl-" .. lock_info.username .. "-" .. lock_info.repository .. "-" .. lock_info.branch .. "-latest")
-		else
-			install_folder = path.getabsolute(get_cache_dir() .. "/gl-" .. lock_info.username .. "-" .. lock_info.repository .. "-latest")
-		end
-		-- check if the folder exists, and therefore if the dependency is installed
-		if not os.isdir(install_folder) then
-			log.info(string.format("Installing github depedency: %s/%s to %s", lock_info.username, lock_info.repository, install_folder))
-			local url = "https://gitlab.com/" .. lock_info.username .. "/" .. lock_info.repository .. ".git"
-			if lock_info.version ~= nil then
-				os.executef("git clone --depth 1 --single-branch --branch v%s -- \"%s\" \"%s\"", lock_info.version, url, install_folder)
-			elseif lock_info.tag ~= nil then
-				os.executef("git clone --depth 1 --single-branch --branch %s -- \"%s\" \"%s\"", lock_info.tag, url, install_folder)
-			elseif lock_info.branch ~= nil then
-				os.executef("git clone --depth 1 --single-branch --branch %s  -- \"%s\" \"%s\"", lock_info.branch, url, install_folder)
-			elseif lock_info.rev ~= nil then
-				-- it's a little difficult to fetch a singular revision from git, so instead we:
-
-				-- intialize an empty repository
-				os.executef("git -C \"%s\" init", install_folder)
-				-- add the remote url as the origin
-				os.executef("git -C \"%s\" remote add origin %s", install_folder, url)
-				-- fetch the specific revision
-				os.executef("git -C \"%s\" fetch --depth 1 origin %s", install_folder, lock_info.rev)
-				-- reset the branch to the revision of interest
-				os.executef("git -C \"%s\" reset --hard FETCH_HEAD", install_folder)
-			else
-				-- latest commit
-				os.executef("git clone --depth 1 --single-branch -- \"%s\" \"%s\"", url, install_folder)
-			end
-		elseif lock_info ~= nil then
-			-- we may need to update the branch, check with git-fetch
-			local output, success = run_command(string.format("git -C \"%s\" fetch --dry-run", install_folder))
-			if success then
-				if string.len(output) > 0 then
-					-- needs an update
-					local format_str = "" 
-					if lock_info.branch ~= nil then format_str = "Updating %s/%s/%s..." else format_str = "Updating %s/%s..." end
-					log.info(string.format(format_str, lock_info.username, lock_info.repository, lock_info.branch))
-					run_command(string.format("git -C \"%s\" reset --hard", install_folder))
-					run_command(string.format("git -C \"%s\" pull", install_folder))
-				end
-			else
-				error(string.format("Failed to validate the integrity of %s/%s", lock_info.username, lock_info.repository))
-			end
-		end
-
-		return lock_info.repository, install_folder
+		return github_like_install(lock_info, "gl", "https://gitlab.com/%s/%s.git")
 	end
 }
 pm.providers.gl.__index = pm.providers.gl
 
 alias(pm.providers, "gitlab", "gl")
 
+-- regular path provider
 pm.providers["path"] = {
 	lock = function(dep_info)
 		-- paths don't really have a specific version, so our job here is easy:
@@ -577,14 +436,14 @@ pm.install = function()
 		-- ignore version key
 		local dep_folders = {}
 		-- for every dependency, lookup the installation provider
-		for i, depedency in ipairs(lockfile_data.dependencies) do
-			local provider = pm.providers[depedency.type]
+		for i, dependency in ipairs(lockfile_data.dependencies) do
+			local provider = pm.providers[dependency.type]
 			if provider ~= nil then
 				-- return the installation directory for the dependency
-				local dep_name, dep_folder = provider.install(depedency)
+				local dep_name, dep_folder = provider.install(dependency)
 				dep_folders[dep_name] = dep_folder
 			else
-				error("Failed to find a provider for: " .. table.tostring(depedency, 1))
+				error("Failed to find a provider for: " .. table.tostring(dependency, 1))
 			end
 		end
 		return dep_folders
