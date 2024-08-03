@@ -331,9 +331,9 @@ pm.providers["path"] = {
 		local lock_info = { type = "path" }
 		if type(dep_info) == "string" then
 			lock_info.path = dep_info
-			-- the name should just be the last folder name in the chain
 			lock_info.name = string.findlast(dep_info, "(%w+)")
 		elseif type(dep_info) == "table" then
+			if dep_info.path == nil then error("Need a \"path\" key in this dependency: " .. table.tostring(dep_info)) end
 			lock_info.path = dep_info.path
 			lock_info.name = dep_info.name or string.findlast(dep_info.path, "(%w+)")
 		end
@@ -352,13 +352,35 @@ pm.providers["path"] = {
 }
 
 -- reads a manifest file and returns the lockfile information that should be generated from it
-pm.parse_manifest = function(manifest_filename, settings)
+pm.parse_manifest = function(manifest_filename, extra_deps)
 	local manifest, err = json.decode(io.readfile(manifest_filename))
 	if err == nil then
-		-- we ignore the version key for now
+		if manifest.dependencies == nil then error("Missing dependencies array in wares.json") end
+		local dependency_specifications = {}
+
 		-- create the deps table
 		local dependencies = {}
-		for k, v in ipairs(manifest.dependencies) do
+
+		-- if the current folder is the root directory (i.e. if we are being run by the root file, then we can add all the deps)
+		if _MAIN_SCRIPT_DIR == path.getabsolute(".") then
+			dependency_specifications = manifest.dependencies
+		else
+			local lockfile, err = json.decode(io.readfile(get_lockfile_path()))
+			if not err == nil then error("Failed to load lock file! Error: " .. err) end
+			-- preload the dependencies from the lockfile
+			dependencies = lockfile.dependencies
+		end
+
+		-- if there are extra deps to be enabled, add them to the dependency specification
+		if #extra_deps > 0 then
+			for _, v in ipairs(extra_deps) do
+				dependency_specifications = table.merge(dependency_specifications, manifest[v])
+			end
+		end
+
+		-- we ignore the version key for now
+		
+		for k, v in ipairs(dependency_specifications) do
 			-- depedencies can only either be a string or a table with more information
 			--assert(type(v) == "string" or type(v) == "table", "depedencies array can only consist of strings or tables!")
 			local lock_info = nil
@@ -415,9 +437,7 @@ end
 ---@param non_default_dep_groups string[]
 pm.update = function(non_default_dep_groups)
 	-- create the lockfile table (always start in the root directory)
-	local lockfile_data = { version = 0, dependencies = pm.parse_manifest(_MAIN_SCRIPT_DIR .. "/wares.json", non_default_dep_groups) }
-
-	print(table.tostring(lockfile_data, 2))
+	local lockfile_data = { version = 0, dependencies = pm.parse_manifest(path.getabsolute(".").. "/wares.json", non_default_dep_groups) }
 
 	-- write lockfile
 	local lockfile_str, err = json.encode(lockfile_data)
@@ -460,6 +480,7 @@ end
 ---@param settings {[string]: boolean}
 ---@return string[]
 pm.sync = function(settings)
+	
 	local extra_deps_to_enable = {}
 	if type(settings) == "table" then
 		for k, v in pairs(settings) do
@@ -470,6 +491,7 @@ pm.sync = function(settings)
 	end
 	
 	-- TODO: only return the dependencies that are specified by the wares.json in this folder
+	-- if we have already synced and we don't need extra dependencies, return the previous dep_folders
 	if pm.dep_folders and #extra_deps_to_enable == 0 then return pm.dep_folders end
 
 	-- check to ensure a manifest file is present
@@ -491,7 +513,8 @@ pm.sync = function(settings)
 
 	if update_lockfile then
 		if #extra_deps_to_enable > 0 then
-			log.info("Update wares.lock... extra=" .. array.tostring(extra_deps_to_enable))
+			log.info("Updating wares.lock... extra=" .. array.tostring(extra_deps_to_enable))
+			-- if we have extra enabled features, we should pass the top-level .lock file to the update function to avoid expensive calculations
 		else
 			log.info("Updating wares.lock...")	
 		end
