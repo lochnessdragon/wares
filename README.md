@@ -28,6 +28,11 @@ Our baseline philosophy is to be *fast, lightweight and a joy to use*.
 - CMake!
 - package lock file (`wares.lock`)
 - global package cache! (WARES_CACHE environment + command line variable)
+- enable/disable package groups
+	- should only be able to effect your own locality, not others
+
+## Lacking:
+- logging into Git
 
 ### Consume packages from:
 - Github

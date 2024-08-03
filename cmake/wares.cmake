@@ -65,26 +65,19 @@ function (invert_bool bool result)
   endif()
 endfunction()
 
-# returns true if one json value is equal to another.
-function(json_equals left right result)
-    set(equal TRUE)
-    # if their types are not equal, then they are not equal
-    string(JSON left_type TYPE ${left})
-    string(JSON right_type TYPE ${right})
-
-    # 
-
-
-    set(${result} ${equal} PARENT_SCOPE)
-endfunction()
+#------
+# JSON
+#------
 
 # returns true if the two elements are not equal
 function(json_nequals left right result)
-    json_equals(${left} ${right} equal)
+    string(JSON equal EQUAL ${left} ${right})
     invert_bool(${equal} ${not_equal})
     set(${result} ${not_equal} PARENT_SCOPE)
 endfunction()
 
+# json_arr_len really isn't a good name because it returns the array length - 1, perfect for a 
+# foreach loop
 # returns the length of a json array
 function(json_arr_len arr result)
     string(JSON len LENGTH ${arr})
@@ -98,7 +91,7 @@ function(json_obj_is_unique json_array json_object result)
     
     # loop through the array
     json_arr_len(json_array array_length)
-    foreach(index RANGE ${deps_lock_array_stop})
+    foreach(index RANGE ${array_length})
         # get the element at that index
         string(JSON element GET ${json_array} ${index})
 
@@ -110,6 +103,13 @@ function(json_obj_is_unique json_array json_object result)
         endif()
     endforeach()
     set(${result} ${found} PARENT_SCOPE)
+endfunction()
+
+#---------
+# Version
+#---------
+
+function(make_version result major minor patch prerelease build)
 endfunction()
 
 # CACHE_DIR
@@ -140,20 +140,23 @@ __wares_log("Wares cache: ${WARES_CACHE}")
 ############################
 
 # Github provider
-function(wares_gh_update DEPEDENCY)
-
+function(wares_gh_update DEPENDENCY)
+    message("Github: ${DEPENDENCY}")
+    set(lock_info_array "[]")
+    return(PROPOGATE lock_info_array)
 endfunction()
 
-function(wares_gh_install DEPEDENCY)
-
+function(wares_gh_install DEPENDENCY)
+    message("Github: ${DEPENDENCY}")
 endfunction()
 
-function(wares_github_update DEPEDENCY)
-    wares_gh_update(DEPENDENCY)
+function(wares_github_update DEPENDENCY)
+    wares_gh_update(${DEPENDENCY})
 endfunction()
 
-function(wares_github_install DEPEDENCY)
-    wares_gh_install(DEPENDENCY)
+function(wares_github_install DEPENDENCY)
+    wares_gh_install(${DEPENDENCY})
+    return(PROPOGATE lock_info_array)
 endfunction()
 
 # Path Provider
@@ -182,10 +185,18 @@ function(wares_path_update DEP_INFO)
 
     if(EXISTS "${path}/wares.json")
         __wares_parse_manifest("${path}/wares.json")
+        set(lock_info_array ${deps_lock_array})
+    else()
+        set(lock_info_array "[]")
     endif()
 
-    message(${lock_info})
+    message(${deps_lock_array})
+
+    string(JSON ${lock_info_array_len} LENGTH ${lock_info_array})
+    string(JSON ${lock_info_array} SET ${lock_info_array} ${lock_info_array_len} ${lock_info})
     
+    message(${deps_lock_array})
+
     return(PROPOGATE lock_info_array)
 endfunction()
 
@@ -220,18 +231,18 @@ function(__wares_parse_manifest FILENAME)
         string(JSON dependency_type TYPE ${manifest_dependencies} ${index})
         string(JSON dependency GET ${manifest_dependencies} ${index})
         if(${dependency_type} STREQUAL "STRING")
-            string(REGEX MATCH "^[A-Za-z]+" ${dependency_provider_id} ${dependency})
+            string(REGEX MATCH "^[A-Za-z]+" dependency_provider_id ${dependency})
             
             # strip the beginning of the string to remove the provider id
-            string(LENGTH ${dependency_provider_id} ${provider_id_length})
+            string(LENGTH ${dependency_provider_id} provider_id_length)
             math(EXPR provider_id_length "${provider_id_length} + 1")
-            string(SUBSTRING ${dependency_provider_id} 0 ${provider_id_length} ${dependency_provider_id})
-            
+            string(SUBSTRING ${dependency} ${provider_id_length} -1 provider_args)
+
             # call the correct provider implementation for install 
             if(NOT COMMAND "wares_${dependency_provider_id}_update")
                 __wares_log("No provider found for: ${dependency_provider_id}")
             else()
-                cmake_language(CALL "wares_${dependency_provider_id}_update" ${dependency})
+                cmake_language(CALL "wares_${dependency_provider_id}_update" ${provider_args})
             endif()
         elseif(${dependency_type} STREQUAL "OBJECT")
             # easy case: get the provider id and look it up
@@ -249,15 +260,15 @@ function(__wares_parse_manifest FILENAME)
 
         # join the new lock info (if it is unique)
         # loop through the new lock_info_array
-        string(JSON lock_info_array_stop LENGTH ${lock_info_array})
-        math(EXPR lock_info_array_stop "${lock_info_array_stop}-1")
+        message("${lock_info_array}")
+        json_arr_len(${lock_info_array} lock_info_array_stop)
         foreach(jindex RANGE ${lock_info_array_stop})
-            # loop through the deps_lock_array
-            string(JSON deps_lock_array_stop LENGTH ${deps_lock_array})
-            math(EXPR deps_lock_array_stop "${deps_lock_array_stop}-1")
-            foreach(jindex RANGE ${deps_lock_array_stop})
-                # if not found in the original deps_lock_array, add it
-            endforeach()
+            # if not found in the original deps_lock_array, add it
+            json_obj_is_unique(${element} ${deps_lock_array} element_unique)
+            if(${element_unique})
+                string(JSON deps_lock_array_len LENGTH ${deps_lock_array})
+                string(JSON deps_lock_array SET ${deps_lock_array} ${deps_lock_array_len} ${element})  
+            endif()
         endforeach()
     endforeach()
 
