@@ -1,0 +1,5 @@
+/target
+premake/wares_old/
+wares_native.dll
+
+cmd.txt
