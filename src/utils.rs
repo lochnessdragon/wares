@@ -31,3 +31,14 @@ pub fn sanitize_filename<S: AsRef<str>>(filename: S) -> String {
 pub fn cache_dir_fallback() -> PathBuf {
 	PathBuf::from(env::var("WARES_CACHE").unwrap_or(String::from("./.wares_cache")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_filename_sanitization() {
+        let result = sanitize_filename("test/file\\\\*sanitized?123<>\"|:");
+        assert_eq!(result, "test_file___sanitized_123_____");
+    }
+}
