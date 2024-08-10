@@ -27,7 +27,8 @@ use colored::Colorize;
 pub mod utils;
 mod premake;
 
-// todo: only return dependencies that are a part of this manifest file.
+// todo: convert paths to absolute
+// todo: add git submodule support
 // todo: contanerize code
 // todo: add spinners! and loading bars
 // todo: add clean function
@@ -353,6 +354,17 @@ impl ManifestFile {
 
 		Ok(manifest)
 	}
+
+	fn dep_names(&self, dep_groups: &Vec<&String>) -> Vec<&str> {
+		let mut dep_names: Vec<&str> = vec![];
+		for group in dep_groups {
+			for dep in &self.dependencies[*group] {
+				dep_names.push(&dep.name);
+			}
+		}
+
+		dep_names
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -567,6 +579,9 @@ pub struct SyncRunner<'a> {
 	overrides: BTreeMap<String, String>,
 	// first time sync has been called by the configuring system?
 	first: bool,
+
+	// store the manifest file
+	manifest: Option<ManifestFile>,
 }
 
 impl SyncRunner<'_> {
@@ -577,24 +592,34 @@ impl SyncRunner<'_> {
 					 cache_folder: cache_folder, 
 					 update: force_update, 
 					 overrides: overrides, 
-					 first: first }
+					 first: first,
+					 manifest: None }
+	}
+
+	fn read_manifest(&mut self) -> Result<(), SyncError>{
+		// try to read the manifest file
+		let manifest_file_contents = fs::read_to_string(self.manifest_file)?;
+		
+		// serialize the manifest
+		self.manifest = Some(ManifestFile::parse(&manifest_file_contents)?);
+
+		Ok(())
 	}
 
 	// compiles a manifest file to a lock file
-	fn update(&self) -> Result<LockFile, SyncError> {
-		// try to read the manifest file
-		let manifest = fs::read_to_string(self.manifest_file)?;
-		
-		// serialize the manifest
-		let manifest = ManifestFile::parse(&manifest)?;
+	fn update(&mut self) -> Result<LockFile, SyncError> {
+		self.read_manifest()?;
+
+		let manifest = self.manifest.as_ref().unwrap();
 
 		// generate the lock file information
 		let mut lockfile = LockFile::new();
 
 		lockfile.lockfile_version = manifest.manifest_version;
 
+		// todo: break out into separate method
 		let default_group = String::from("dependencies");
-  		let mut dep_groups = vec![&default_group];
+		let mut dep_groups = vec![&default_group];
 		dep_groups.extend(self.extra_deps.iter());
 
 		for dep_group in dep_groups {
@@ -618,11 +643,30 @@ impl SyncRunner<'_> {
 	}
 
 	// ensures all the dependencies specified by a lock file are installed on the system and returns their paths
-	fn install(&self, lockfile: LockFile) -> Result<BTreeMap<String, String>, SyncError> {
-		let mut installation_info: BTreeMap<String, String> = self.overrides.clone();
+	fn install(&mut self, lockfile: LockFile) -> Result<BTreeMap<String, String>, SyncError> {
+		// read the manifest in if we haven't already
+		if let None = self.manifest {
+			self.read_manifest()?;
+		}
+
+		let manifest = self.manifest.as_ref().unwrap();
+
+		let default_group = String::from("dependencies");
+		let mut dep_groups = vec![&default_group];
+		dep_groups.extend(self.extra_deps.iter());
+		let my_dependencies: Vec<&str> = manifest.dep_names(&dep_groups);
+
+		let mut installation_info: BTreeMap<String, String> = BTreeMap::new();
+
+		// add all of the overrides that apply to our folder to the installation_info
+		for (name, folder) in &self.overrides {
+			if my_dependencies.contains(&name.as_str()) {
+				installation_info.insert(name.clone(), folder.clone());
+			}
+		}
 		
 		for (name, dependency) in lockfile.dependencies {
-			if !installation_info.contains_key(&name) {
+			if !installation_info.contains_key(&name) && my_dependencies.contains(&name.as_str()) {
 				installation_info.insert(name, dependency.install(self.cache_folder)?);
 			}
 		}
