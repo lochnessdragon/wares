@@ -53,11 +53,11 @@ wares.sync = function(extra_deps, dont_include)
 
 	local result = wares_native.sync_backend(_MAIN_SCRIPT_DIR, os.realpath("./"), _OPTIONS["wares-cache"], actual_extra_deps, overrides)
 
+	-- if our result is an error, print the error
 	if type(result) == "string" then 
-		error("wares backend error: " .. result)
+		log.error("Backend error: " .. result)
+		error("Wares backend error: " .. result)
 	end
-
-	-- print(table.tostring(result, 1))
 
 	for dep_name, folder in pairs(result) do
 		-- create new options from the result for overrides to prevent premake from erroring out on an unknown option

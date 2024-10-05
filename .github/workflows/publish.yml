@@ -1,0 +1,20 @@
+# this workflow runs the publish action
+name: Publish
+
+on:
+  # only allow this workflow to be run manually
+  workflow_dispatch:
+
+# force cargo to use color
+env: 
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # build the native dependencies + upload
+  publish_native:
+    runs-on: [windows, linux, macOS]
+    
+
+  # "compile" the scripts that reqiure custom info (such as get_wares)
+  publish_scripts:
+    runs-on: ubuntu-latest # the os doesn't matter so much, we're just publishing get_wares

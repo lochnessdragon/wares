@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
+#![feature(error_generic_member_access)]
 
 use std::io::{self, BufReader};
 use std::io::BufWriter;
@@ -22,15 +23,20 @@ use regex::Regex;
 
 use git2::{Remote, Repository};
 
+// terminal ui
 use colored::Colorize;
+use spinoff::{Spinner, spinners, Color};
 
 pub mod utils;
+pub mod cache;
 mod premake;
 
 // todo: convert paths to absolute
 // todo: add git submodule support
 // todo: contanerize code
 // todo: add spinners! and loading bars
+//        * spinners ==> installation
+//        * loading bars ==> ??
 // todo: add clean function
 // todo: don't rely on git for versioning information if we're offline -> fallback to cache
 // todo: deal with dependencies of multiple projects
@@ -72,10 +78,10 @@ pub enum DependencyParseError {
 	#[error("Dependency type {0} is unknown.")]
 	UnknownProvider(String),
 
-	#[error("Failed to parse the semantic verion")]
+	#[error("Failed to parse the semantic verion: {0}")]
 	SemverParse(#[from] semver::Error),
 
-	#[error("Failed to parse the commit hash")]
+	#[error("Failed to parse the commit hash: {0}")]
 	CommitParse(#[from] std::num::ParseIntError),
 
 	#[error("Failed to parse the specifier from {0}")]
@@ -84,13 +90,13 @@ pub enum DependencyParseError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum LockingError {
-	#[error("Git backend error")]
+	#[error("Git backend error: {0}")]
 	Git(#[from] git2::Error),
 
-	#[error("Regex error")]
+	#[error("Regex error: {0}")]
 	Regex(#[from] regex::Error),
 
-	#[error("Version parse error")]
+	#[error("Version parse error: {0}")]
 	Version(#[from] semver::Error),
 
 	#[error("Failed to find a version matching the version requirement: {0}")]
@@ -194,7 +200,6 @@ impl ManifestDependency {
 		match &self.specifier {
 			Specifier::MainBranch => Ok(LockedDependency { url: self.repo_url.clone(), id: LockedDependencyId::MainBranch }), // TODO: update to actual choose the default branch
 			Specifier::Branch(branch) => Ok(LockedDependency { url: self.repo_url.clone(), id: LockedDependencyId::Branch(branch.clone()) }),
-			//Specifier::CommitHash(hash) => LockedDependency { url: self.repo_url, rev: utils::encode_hex(hash) },
 			Specifier::Version(requirement) => {
 				// git ls-remote
 				// parse the remote refs for version information
@@ -312,10 +317,10 @@ pub enum ManifestFileParseError {
 	#[error("Wrong type for key: {0}")]
 	WrongType(String),
 
-	#[error("TOML parse error")]
+	#[error("TOML parse error: {0}")]
 	TOML(#[from] toml::de::Error),
 
-	#[error("Dependency parse error")]
+	#[error("Dependency parse error: {0}")]
 	DependencyParse(#[from] DependencyParseError)
 }
 
@@ -414,13 +419,15 @@ impl LockedDependency {
 		}
 	}
 
-	// installs the github repository into the cache specified at path and returns the installation folder as a string
+	// installs the github repository into the cache specified at path 
+	// returns the installation folder as a string
 	fn install(&self, cache_path: &Path) -> Result<String, SyncError> {
-		let mut install_path = cache_path.to_path_buf();
-		install_path.push(self.uuid());
+		let mut install_path = utils::get_full_path(cache_path)?; // might? error out if the cache doesn't exist yet
+		install_path.push(self.uuid()); // this path should now be absolute
 
 		if !install_path.exists() {
-			println!("Installing {} to {}", self.url, install_path.display());
+			let mut spinner = Spinner::new(spinners::Dots, format!("Installing {} to {}", self.url, install_path.display()), Color::Blue);
+
 			match self.id {
 				LockedDependencyId::Oid(oid) => {
 					// git doesn't allow cloning a commit directly, so instead we:
@@ -444,6 +451,8 @@ impl LockedDependency {
 					clone_builder.clone(&self.url, &install_path)?;
 				}
 			}
+
+			spinner.success("Done!");
 		}
 
 		Ok(String::from(install_path.to_str().expect("Non UTF-8 character in path")))
@@ -548,20 +557,20 @@ impl LockFile {
 
 #[derive(thiserror::Error, Debug)]
 pub enum SyncError {
-    #[error("IO Error")]
-    IoError(#[from] io::Error),
+    #[error("IO Error: {0}")]
+    IoError(#[backtrace] #[from] io::Error),
 
-    #[error("Failed to parse the manifest")]
-    ManifestFileParseError(#[from] ManifestFileParseError),
+    #[error("Failed to parse the manifest: {0}")]
+    ManifestFileParseError(#[backtrace] #[from] ManifestFileParseError),
 
-    #[error("Failed to lock a dependency")]
-    LockError(#[from] LockingError),
+    #[error("Failed to lock a dependency: {0}")]
+    LockError(#[backtrace] #[from] LockingError),
 
-    #[error("Failed to serialize json")]
-    JsonError(#[from] serde_json::Error),
+    #[error("Failed to serialize json: {0}")]
+    JsonError(#[backtrace] #[from] serde_json::Error),
 
-    #[error("Git error")]
-    Git(#[from] git2::Error)
+    #[error("Git error: {0}")]
+    Git(#[backtrace] #[from] git2::Error)
 }
 
 pub struct SyncRunner<'a> {
@@ -661,7 +670,9 @@ impl SyncRunner<'_> {
 		// add all of the overrides that apply to our folder to the installation_info
 		for (name, folder) in &self.overrides {
 			if my_dependencies.contains(&name.as_str()) {
-				installation_info.insert(name.clone(), folder.clone());
+				// the folder location should be absolute to the root wares path so that overrides actually function correctly
+				let full_path = utils::get_full_path(folder)?;
+				installation_info.insert(name.clone(), full_path.to_str().expect("Path contains invalid Unicode characters").to_string());
 			}
 		}
 		

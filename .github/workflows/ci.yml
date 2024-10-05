@@ -1,4 +1,4 @@
-# This workflow runs the CMake and Premake tests
+# This workflow runs the tests
 name: CI
 
 # Controls when the workflow will run
