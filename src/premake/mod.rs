@@ -1,21 +1,35 @@
 // premake plugin
-mod luashim;
 
+// standard libraries
 use std::ffi::NulError;
 use std::{collections::BTreeMap, path::PathBuf, str::Utf8Error};
 use core::ffi::CStr;
 use std::ptr;
 use std::sync::OnceLock;
 use std::ffi::CString;
+
+// lua dependencies
+mod luashim;
 use luashim::*;
+
+// error handling
+use snafu::{Snafu, ResultExt, Backtrace, ErrorCompat};
+
+// text coloration
+use colored::Colorize;
+
+// internal dependencies
 use crate::{utils, SyncError, SyncRunner};
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug, Snafu)]
 enum ReadLuaValueError {
-	#[error("Type mismatch")]
-	TypeMismatch,
-	#[error("Utf-8 Error")]
-	Utf8Error(#[backtrace] #[from] Utf8Error)
+	// ReadLuaValueError (RLE) -- namespaced for snafu
+	#[snafu(display("Type mismatch"))]
+	RLETypeMismatch{ backtrace: Backtrace },
+
+	// ReadLuaValueError (RLE)
+	#[snafu(display("Utf-8 Error {source}"))]
+	RLEUtf8 { source: Utf8Error, backtrace: Backtrace }
 }
 
 // debugging the lua stack
@@ -29,7 +43,7 @@ unsafe fn print_lua_stack_top(state: *mut lua_State, count: u32) {
 unsafe fn read_lua_string_array(state: *mut lua_State, stack_index: i32) -> Result<Vec<String>, ReadLuaValueError> {
 	if lua_type(state, stack_index) != LUA_TTABLE as i32 {
 		println!("read_string_array: Not a table!");
-		return Err(ReadLuaValueError::TypeMismatch);
+		return RLETypeMismatchSnafu.fail();
 	}
 
 	let size = luaL_len(state, stack_index);
@@ -41,9 +55,9 @@ unsafe fn read_lua_string_array(state: *mut lua_State, stack_index: i32) -> Resu
 		lua_rawgeti(state, stack_index, i);
 		let str_ptr = lua_tolstring(state, -1, ptr::null_mut());
 		if str_ptr == ptr::null() {
-			return Err(ReadLuaValueError::TypeMismatch);
+			return RLETypeMismatchSnafu.fail();
 		}
-		result.push(CStr::from_ptr(str_ptr).to_str()?.to_owned());
+		result.push(CStr::from_ptr(str_ptr).to_str().context(RLEUtf8Snafu)?.to_owned());
 		lua_settop(state, -2); // "pop" value
 	}
 
@@ -53,7 +67,7 @@ unsafe fn read_lua_string_array(state: *mut lua_State, stack_index: i32) -> Resu
 unsafe fn read_lua_string_map(state: *mut lua_State, stack_index: i32) -> Result<BTreeMap<String, String>, ReadLuaValueError> {
 	assert!(stack_index < 0);
 	if lua_type(state, stack_index) != LUA_TTABLE as i32 {
-		return Err(ReadLuaValueError::TypeMismatch);
+		return RLETypeMismatchSnafu.fail();
 	}
 
 	let mut result: BTreeMap<String, String> = BTreeMap::new();
@@ -64,21 +78,21 @@ unsafe fn read_lua_string_map(state: *mut lua_State, stack_index: i32) -> Result
 		// key is now at index -2 and value is at index -1
 		if lua_isstring(state, -2) == 0 {
 			// key needs to be a string
-			return Err(ReadLuaValueError::TypeMismatch);
+			return RLETypeMismatchSnafu.fail();
 		}
 
 		if lua_isstring(state, -1) == 0 {
 			// value needs to be a string
-			return Err(ReadLuaValueError::TypeMismatch);
+			return RLETypeMismatchSnafu.fail();
 		}
 
 		// retreive the key
 		let key_ptr = lua_tolstring(state, -2, ptr::null_mut());
-		let key = CStr::from_ptr(key_ptr).to_str()?.to_owned();
+		let key = CStr::from_ptr(key_ptr).to_str().context(RLEUtf8Snafu)?.to_owned();
 
 		// retreive the value
 		let value_ptr = lua_tolstring(state, -1, ptr::null_mut());
-		let value = CStr::from_ptr(value_ptr).to_str()?.to_owned();
+		let value = CStr::from_ptr(value_ptr).to_str().context(RLEUtf8Snafu)?.to_owned();
 
 		result.insert(key, value);
 
@@ -89,19 +103,22 @@ unsafe fn read_lua_string_map(state: *mut lua_State, stack_index: i32) -> Result
 	Ok(result)
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug, Snafu)]
 enum PremakeSyncError {
-	#[error("API Error: {0}")]
-	APIError(&'static str),
+	#[snafu(display("API Error: {message}"))]
+	PSEApi{ message: &'static str, backtrace: Backtrace },
 
-	#[error("Utf8Error: {0}")]
-	Utf8(#[from] Utf8Error),
+	#[snafu(display("Utf8Error: {source}"))]
+	PSEUtf8{ source: Utf8Error, backtrace: Backtrace },
 
-	#[error("CString::NulError: {0}")]
-	NulError(#[from] NulError),
+	#[snafu(display("CString::NulError: {source}"))]
+	PSENul{ source: NulError, backtrace: Backtrace },
 
-	#[error("SyncError: {0}")]
-	SyncError(#[from] SyncError)
+	#[snafu(display("SyncError: {source}"))]
+	PSESync{ 
+		#[snafu(backtrace)]
+		source: SyncError 
+	}
 }
 
 // stack:
@@ -120,20 +137,20 @@ unsafe fn premake_sync_detail(state: *mut lua_State) -> Result<(), PremakeSyncEr
 	// read in lock folder name
 	let root_str_ptr = lua_tolstring(state, -5, ptr::null_mut());
 	if root_str_ptr == ptr::null() {
-		return Err(PremakeSyncError::APIError("The first argument must be a string specifying the folder that wares.lock is in!"));
+		return PSEApiSnafu{ message: "The first argument must be a string specifying the folder that wares.lock is in!" }.fail();
 	}
 
-	let mut lock_file = PathBuf::from(CStr::from_ptr(root_str_ptr).to_str()?); 
+	let mut lock_file = PathBuf::from(CStr::from_ptr(root_str_ptr).to_str().context(PSEUtf8Snafu)?); 
 	lock_file.push("wares");
 	lock_file.set_extension("lock");
 
 	// read in manifest folder name
 	let current_str_ptr = lua_tolstring(state, -4, ptr::null_mut());
 	if current_str_ptr == ptr::null() {
-		return Err(PremakeSyncError::APIError("The second argument must be a string specifying the folder that wares.toml is in!"));
+		return PSEApiSnafu{ message: "The second argument must be a string specifying the folder that wares.toml is in!" }.fail();
 	}
 
-	let mut manifest_file = PathBuf::from(CStr::from_ptr(current_str_ptr).to_str()?);
+	let mut manifest_file = PathBuf::from(CStr::from_ptr(current_str_ptr).to_str().context(PSEUtf8Snafu)?);
 
 	manifest_file.push("wares");
 	manifest_file.set_extension("toml");
@@ -141,7 +158,7 @@ unsafe fn premake_sync_detail(state: *mut lua_State) -> Result<(), PremakeSyncEr
 	// read in cache folder
 	let cache_folder = if lua_isstring(state, -3) > 0 {
 		let cache_folder_ptr = lua_tolstring(state, -3, ptr::null_mut());
-		PathBuf::from(CStr::from_ptr(root_str_ptr).to_str()?)
+		PathBuf::from(CStr::from_ptr(root_str_ptr).to_str().context(PSEUtf8Snafu)?)
 	} else {
 		utils::cache_dir_fallback()
 	};
@@ -149,22 +166,22 @@ unsafe fn premake_sync_detail(state: *mut lua_State) -> Result<(), PremakeSyncEr
 	// read in extra deps array
 	let extra_deps: Vec<String> = match read_lua_string_array(state, -2) {
 		Ok(value) => value,
-		Err(ReadLuaValueError::TypeMismatch) => {
-			return Err(PremakeSyncError::APIError("The extra_deps array must contain only strings"));
+		Err(ReadLuaValueError::RLETypeMismatch{backtrace}) => {
+			return Err(PremakeSyncError::PSEApi{ message: "The extra_deps array must contain only strings", backtrace: backtrace });
 		},
-		Err(ReadLuaValueError::Utf8Error(utf8_error)) => {
-			return Err(PremakeSyncError::Utf8(utf8_error));
+		Err(ReadLuaValueError::RLEUtf8{ source, backtrace }) => {
+			return Err(PremakeSyncError::PSEUtf8{source: source, backtrace: backtrace });
 		}
 	};
 
 	// read in overrides map
 	let overrides: BTreeMap<String, String> = match read_lua_string_map(state, -1){
 		Ok(value) => value,
-		Err(ReadLuaValueError::TypeMismatch) => {
-			return Err(PremakeSyncError::APIError("The overrides table must be a map of strings to strings"));
+		Err(ReadLuaValueError::RLETypeMismatch{ backtrace }) => {
+			return Err(PremakeSyncError::PSEApi{ message: "The overrides table must be a map of strings to strings", backtrace: backtrace });
 		},
-		Err(ReadLuaValueError::Utf8Error(utf8_error)) => {
-			return Err(PremakeSyncError::Utf8(utf8_error));
+		Err(ReadLuaValueError::RLEUtf8{ source, backtrace }) => {
+			return Err(PremakeSyncError::PSEUtf8{ source: source, backtrace: backtrace });
 		}
 	};
 
@@ -181,16 +198,16 @@ unsafe fn premake_sync_detail(state: *mut lua_State) -> Result<(), PremakeSyncEr
 		*UPDATED_LAST.get_mut().expect("OnceLock failed us!") = true;
 	}
 
-	let deps = runner.sync()?;
+	let deps = runner.sync().context(PSESyncSnafu)?;
 	// create a table to hold the dependencies
 	lua_createtable(state, 0, deps.keys().len() as i32);
 	for (dep_name, install_folder) in deps {
 		// push the key
-		let key = CString::new(dep_name)?;
+		let key = CString::new(dep_name).context(PSENulSnafu)?;
 		lua_pushstring(state, key.as_ptr());
 
 		// push the value
-		let value = CString::new(install_folder)?;
+		let value = CString::new(install_folder).context(PSENulSnafu)?;
 		lua_pushstring(state, value.as_ptr());
 
 		// place that in the table
@@ -204,9 +221,16 @@ unsafe fn premake_sync_detail(state: *mut lua_State) -> Result<(), PremakeSyncEr
 pub unsafe extern "C" fn premake_sync(state: *mut lua_State) -> i32 {
 	match premake_sync_detail(state).err() {
 		Some(error) => {
-			let b = error.provide();
-			println!("Wares error: {error}");
-			lua_pushstring(state, CString::new(format!("{error}")).unwrap().as_ptr()); // instead of unwrapping, try to handle the error
+			// build our report
+			let mut report = format!("{error}");
+			match ErrorCompat::backtrace(&error) {
+				Some(trace) => {
+					report += &format!("\n\nBacktrace:\n{trace}");
+				},
+				_ => {}
+			};
+
+			lua_pushstring(state, CString::new(report).unwrap().as_ptr()); // instead of unwrapping, try to handle the error
 		},
 		_ => {}
 	}
@@ -231,7 +255,7 @@ pub unsafe extern "C" fn luaopen_wares_native(state: *mut lua_State) -> i32 {
 	shimInitialize(state);
 	luaL_register(state, wares_string.as_ptr() as *const i8, Box::into_raw(wares_functions) as *const luaL_Reg);
 
-	println!("Wares v0.0.1-nightly initialized");
+	println!("{} {}-{} initialized", "Wares".cyan(), "v0.0.1".green(), "nightly".red());
 	// no errors, return 0
 	0
 }
