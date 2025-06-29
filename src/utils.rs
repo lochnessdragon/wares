@@ -34,6 +34,7 @@ pub fn is_valid_hash(s: &str) -> bool {
 	s.len() == 40 && s.as_bytes().iter().all(|c| { HEX_CHARS.contains(c) })
 }
 
+// removes invalid characters from a filename and returns it as a String
 pub fn sanitize_filename<S: AsRef<str>>(filename: S) -> String {
 	let str_ref = filename.as_ref();
 
@@ -47,11 +48,12 @@ pub fn sanitize_filename<S: AsRef<str>>(filename: S) -> String {
 		}).collect()
 }
 
-// Provide a fallback for the wares cache directory
+// provide a fallback for the wares cache directory
 pub fn cache_dir_fallback() -> PathBuf {
 	PathBuf::from(env::var("WARES_CACHE").unwrap_or(String::from("./.wares_cache")))
 }
 
+// convert a relative path to an absolute path
 pub fn get_full_path<P: std::convert::AsRef<std::path::Path>>(path: P) -> Result<PathBuf, std::io::Error> {
 	let full_path = std::fs::canonicalize(path)?;
 	Ok(if full_path.to_str().unwrap().starts_with("\\\\?\\") {

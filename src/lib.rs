@@ -38,6 +38,9 @@ use lock::LockFile;
 // todo: deal with dependencies of multiple projects
 // todo: version resolver
 // todo: just write a build system?
+// todo: add support for zip: prefix
+// todo: integration with package manager
+// pretty-print errors
 
 #[derive(Debug, Snafu)]
 pub enum SyncError {
