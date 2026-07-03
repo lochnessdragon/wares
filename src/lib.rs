@@ -87,7 +87,7 @@ pub struct SyncRunner<'a> {
 }
 
 impl SyncRunner<'_> {
-	fn build<'a>(extra_deps: &'a Vec<String>, manifest_file: &'a Path, lock_file: &'a Path, cache_folder: &'a Path, force_update: bool, overrides: BTreeMap<String, String>, first: bool) -> SyncRunner<'a> {
+	pub fn build<'a>(extra_deps: &'a Vec<String>, manifest_file: &'a Path, lock_file: &'a Path, cache_folder: &'a Path, force_update: bool, overrides: BTreeMap<String, String>, first: bool) -> SyncRunner<'a> {
 		SyncRunner { extra_deps: extra_deps, 
 					 manifest_file: manifest_file, 
 					 lock_file: lock_file, 
@@ -131,7 +131,7 @@ impl SyncRunner<'_> {
 		}
 
 		// write the lock file
-		if self.first {
+		if self.first || !self.lock_file.exists() {
 			println!("{} {}", "Writing".green(), "wares.lock".yellow());
 			serde_json::to_writer(BufWriter::new(File::create(self.lock_file).context(IoSnafu{ context: format!("creating \"{:?}\"", self.lock_file) })?), &lockfile).context(JsonSnafu)?;
 		} else {
