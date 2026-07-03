@@ -201,8 +201,10 @@ impl ManifestDependency {
 				let mut versions: BTreeMap<Version, git2::Oid> = BTreeMap::new();
 
 				// this is one girthy regex! recommend regex101 or other regex validator
+				// allows versions starting with v, release-, prerelease-, preview- or nothing
+				// e.g. SDL uses release-, prerelease- and preview- in front of their version numbers
 				static VERSION_REGEX: OnceLock<Regex> = OnceLock::new();
-				let version_regex = VERSION_REGEX.get_or_init(|| Regex::new(r"refs/tags/v?((?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?(?:\.(?:0|[1-9]\d*))?(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?:[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)").unwrap());
+				let version_regex = VERSION_REGEX.get_or_init(|| Regex::new(r"refs/tags/(?:v|release-|prerelease-|preview-)?((?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?(?:\.(?:0|[1-9]\d*))?(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?:[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)").unwrap());
 				
 				for git_ref in refs {
 					let potential_version_str = git_ref.name();
