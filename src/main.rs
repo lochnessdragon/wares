@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, env};
 
-use wares_native::sync;
+use wares_native::SyncRunner;
+use wares_native::utils;
 
 use std::path::PathBuf;
 use clap::{Parser, Subcommand};
@@ -8,6 +9,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 // wares sync [enabled_groups]... --root="" --current=""
+// wares clean
+// wares add [link_to_github_repo]
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -84,6 +87,7 @@ fn main() {
 			// find the cache directory or a fallback
 			let cache_dir: PathBuf = cache.clone().unwrap_or_else(utils::cache_dir_fallback);
 
+			// initialize variables required for implementation
 			let mut sync_runner = SyncRunner::build(&enabled_groups, &manifest_file, &lock_file, &cache_dir, !*backend, overrides, *first);
 
 			// force sync if backend output is not set
@@ -98,6 +102,7 @@ fn main() {
 					}
 				},
 				Err(error) => {
+					// TODO: map errors to json for backend
 					println!("{error}");
 				},
 			} 
