@@ -110,7 +110,7 @@ get_cmake_test()
 include(cmake_test/cmake_test)
 
 # custom:
-list(APPEND CMAKE_MODULE_PATH "../")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../")
 # for later calls to: include(wares)
 
 ct_add_dir("./cmake_tests", CT_DEBUG_MODE_ON)
